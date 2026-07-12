@@ -1,13 +1,17 @@
 package com.joopapa.familyalbum.media;
 
 import jakarta.validation.Valid;
+import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.multipart.MultipartFile;
 
+import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -29,6 +33,14 @@ public class MediaController {
     @GetMapping("/media")
     List<MediaDtos.MediaAssetResponse> listMedia() {
         return mediaService.listAssets();
+    }
+
+    @PostMapping("/media/upload")
+    MediaDtos.MediaAssetResponse uploadMedia(
+            @RequestParam("file") MultipartFile file,
+            @RequestParam(value = "capturedAt", required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) Instant capturedAt
+    ) {
+        return mediaService.uploadFile(file, capturedAt);
     }
 
     @PostMapping("/media/upload-url")

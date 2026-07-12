@@ -66,7 +66,7 @@ server {
     listen [::]:80;
     server_name album.joopapa.com;
 
-    client_max_body_size 50m;
+    client_max_body_size 2048m;
 
     location / {
         proxy_pass http://127.0.0.1:8081;
@@ -92,3 +92,15 @@ If Certbot is installed, issue HTTPS after DNS points to the Lightsail public IP
 ```bash
 sudo certbot --nginx -d album.joopapa.com
 ```
+
+## 5. 대용량 업로드
+
+FamilyAlbum의 기본 업로드는 브라우저가 Spring Boot로 파일을 보내고, Spring Boot가 Object Storage에 업로드하는 방식입니다. 호스트 Nginx 설정에도 충분한 업로드 제한을 둬야 합니다.
+
+`
+ginx
+client_max_body_size 2048m;
+proxy_request_buffering off;
+proxy_read_timeout 1800s;
+proxy_send_timeout 1800s;
+` 

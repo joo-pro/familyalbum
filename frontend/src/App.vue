@@ -86,46 +86,24 @@ async function uploadSelectedFiles() {
   if (selectedFiles.value.length === 0) return
 
   isUploading.value = true
-  uploadMessage.value = '업로드 URL을 준비하고 있어요.'
+  uploadMessage.value = '서버를 통해 업로드를 준비하고 있어요.'
 
   try {
     for (const file of selectedFiles.value) {
-      const presignResponse = await fetch('/api/media/upload-url', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          filename: file.name,
-          contentType: file.type || 'application/octet-stream',
-          byteSize: file.size,
-          capturedAt: new Date(file.lastModified).toISOString(),
-        }),
-      })
-
-      if (!presignResponse.ok) {
-        throw new Error('업로드 URL을 만들지 못했어요.')
-      }
-
-      const presign = await presignResponse.json()
       uploadMessage.value = `${file.name} 업로드 중이에요.`
 
-      const uploadResponse = await fetch(presign.uploadUrl, {
-        method: 'PUT',
-        headers: { 'Content-Type': file.type || 'application/octet-stream' },
-        body: file,
-      })
+      const formData = new FormData()
+      formData.append('file', file)
+      formData.append('capturedAt', new Date(file.lastModified).toISOString())
 
-      if (!uploadResponse.ok) {
-        throw new Error('스토리지 업로드에 실패했어요.')
-      }
-
-      const completeResponse = await fetch('/api/media/upload-complete', {
+      const response = await fetch('/api/media/upload', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ assetId: presign.assetId }),
+        body: formData,
       })
 
-      if (!completeResponse.ok) {
-        throw new Error('업로드 검증에 실패했어요.')
+      if (!response.ok) {
+        const message = await response.text()
+        throw new Error(message || '업로드에 실패했어요.')
       }
     }
 

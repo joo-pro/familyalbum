@@ -3,6 +3,10 @@ spring:
     name: family-album
   autoconfigure:
     exclude: org.springframework.boot.autoconfigure.security.servlet.UserDetailsServiceAutoConfiguration
+  servlet:
+    multipart:
+      max-file-size: ${MAX_FILE_SIZE:2GB}
+      max-request-size: ${MAX_REQUEST_SIZE:2GB}
   datasource:
     url: ${DATABASE_URL:jdbc:postgresql://localhost:5432/family_album}
     username: ${DATABASE_USERNAME:joopapa}

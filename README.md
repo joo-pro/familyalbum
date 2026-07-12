@@ -27,10 +27,10 @@ browser
 업로드 흐름:
 
 ```text
-1. 브라우저가 Spring API에 업로드 URL 요청
-2. Spring이 권한과 메타데이터를 확인하고 presigned PUT URL 발급
-3. 브라우저가 Object Storage로 직접 업로드
-4. 브라우저가 Spring API에 업로드 완료 알림
+1. 브라우저가 Spring API에 multipart/form-data로 파일 전송
+2. Spring이 파일 타입과 메타데이터 확인
+3. Spring이 S3 호환 API로 Object Storage에 업로드
+4. Spring이 업로드된 객체를 검증
 5. Spring이 DB의 미디어 상태를 갱신
 ```
 
@@ -116,6 +116,16 @@ http://localhost:5173
 
 Vite 개발 서버는 `/api` 요청을 `http://localhost:8080`으로 프록시합니다.
 
+## 기본 업로드 방식
+
+기본값은 Spring Boot 경유 업로드입니다.
+
+`	ext
+브라우저 -> Spring Boot -> Object Storage
+` 
+
+이 방식은 버킷 CORS 설정이 필요 없어 포크해서 쓰기 쉽습니다. 대용량 업로드를 위해 운영 nginx와 Spring multipart 제한은 충분히 크게 설정해야 합니다.
+
 ## 환경변수
 
 로컬 참고용 예시는 `.env.example`에 있습니다.
@@ -174,8 +184,9 @@ LIGHTSAIL_SSH_KEY
 ```text
 GET  /api/health
 GET  /api/media
-POST /api/media/upload-url
-POST /api/media/upload-complete
+POST /api/media/upload
+POST /api/media/upload-url        # advanced direct upload용
+POST /api/media/upload-complete   # advanced direct upload용
 POST /api/media/{assetId}/download-url
 ```
 

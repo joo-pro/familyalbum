@@ -4,6 +4,8 @@ import com.joopapa.familyalbum.storage.StorageProperties;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
+import org.springframework.web.multipart.MultipartFile;
+import software.amazon.awssdk.core.sync.RequestBody;
 import software.amazon.awssdk.services.s3.S3Client;
 import software.amazon.awssdk.services.s3.model.GetObjectRequest;
 import software.amazon.awssdk.services.s3.model.HeadObjectRequest;
@@ -13,6 +15,7 @@ import software.amazon.awssdk.services.s3.presigner.S3Presigner;
 import software.amazon.awssdk.services.s3.presigner.model.GetObjectPresignRequest;
 import software.amazon.awssdk.services.s3.presigner.model.PutObjectPresignRequest;
 
+import java.io.IOException;
 import java.time.Instant;
 import java.util.List;
 import java.util.Locale;
@@ -45,13 +48,46 @@ public class MediaService {
     }
 
     @Transactional
+    public MediaDtos.MediaAssetResponse uploadFile(MultipartFile file, Instant capturedAt) {
+        String contentType = normalizeContentType(file.getContentType());
+        MediaType mediaType = detectMediaType(contentType);
+        String filename = cleanFilename(file.getOriginalFilename());
+        String objectKey = createOriginalObjectKey(filename);
+
+        MediaAsset asset = mediaAssetRepository.save(new MediaAsset(
+                objectKey,
+                filename,
+                contentType,
+                mediaType,
+                file.getSize(),
+                capturedAt
+        ));
+
+        try {
+            s3Client.putObject(
+                    PutObjectRequest.builder()
+                            .bucket(storageProperties.bucket())
+                            .key(objectKey)
+                            .contentType(contentType)
+                            .build(),
+                    RequestBody.fromInputStream(file.getInputStream(), file.getSize())
+            );
+            verifyUploadedObject(asset);
+            asset.markUploaded();
+            return MediaDtos.MediaAssetResponse.from(asset);
+        } catch (IOException exception) {
+            asset.markFailed();
+            throw new IllegalStateException("Failed to read uploaded file", exception);
+        } catch (RuntimeException exception) {
+            asset.markFailed();
+            throw exception;
+        }
+    }
+
+    @Transactional
     public MediaDtos.CreateUploadUrlResponse createUploadUrl(MediaDtos.CreateUploadUrlRequest request) {
         MediaType mediaType = detectMediaType(request.contentType());
-        String objectKey = "originals/%s/%s%s".formatted(
-                Instant.now().toString().substring(0, 10).replace("-", "/"),
-                UUID.randomUUID(),
-                extensionOf(request.filename())
-        );
+        String objectKey = createOriginalObjectKey(request.filename());
         MediaAsset asset = mediaAssetRepository.save(new MediaAsset(
                 objectKey,
                 cleanFilename(request.filename()),
@@ -125,6 +161,14 @@ public class MediaService {
         }
     }
 
+    private static String createOriginalObjectKey(String filename) {
+        return "originals/%s/%s%s".formatted(
+                Instant.now().toString().substring(0, 10).replace("-", "/"),
+                UUID.randomUUID(),
+                extensionOf(filename)
+        );
+    }
+
     private static MediaType detectMediaType(String contentType) {
         String lower = contentType.toLowerCase(Locale.ROOT);
         if (lower.startsWith("image/")) {
@@ -136,8 +180,15 @@ public class MediaService {
         throw new IllegalArgumentException("Only image and video files are supported");
     }
 
+    private static String normalizeContentType(String contentType) {
+        if (contentType == null || contentType.isBlank()) {
+            return "application/octet-stream";
+        }
+        return contentType;
+    }
+
     private static String cleanFilename(String filename) {
-        String cleaned = StringUtils.cleanPath(filename).replace("\"", "");
+        String cleaned = StringUtils.cleanPath(filename == null ? "" : filename).replace("\"", "");
         return cleaned.isBlank() ? "upload" : cleaned;
     }
 
