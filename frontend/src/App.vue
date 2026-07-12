@@ -13,6 +13,7 @@ const assets = ref([])
 const selectedFiles = ref([])
 const isUploading = ref(false)
 const uploadMessage = ref('')
+const activeAsset = ref(null)
 
 const uploadedCount = computed(() => assets.value.length)
 const photoCount = computed(() => assets.value.filter((asset) => asset.mediaType === 'IMAGE').length)
@@ -22,6 +23,21 @@ const uploadButtonLabel = computed(() => {
   if (isUploading.value) return '업로드 중'
   if (selectedFiles.value.length > 0) return `${selectedFiles.value.length}개 업로드`
   return '파일을 먼저 선택해 주세요'
+})
+const timelineGroups = computed(() => {
+  const groups = new Map()
+  for (const asset of assets.value) {
+    const key = dayKey(assetDate(asset))
+    if (!groups.has(key)) {
+      groups.set(key, {
+        key,
+        label: formatDayLabel(assetDate(asset)),
+        assets: [],
+      })
+    }
+    groups.get(key).assets.push(asset)
+  }
+  return Array.from(groups.values())
 })
 
 onMounted(async () => {
@@ -81,6 +97,7 @@ async function uploadSelectedFiles() {
           filename: file.name,
           contentType: file.type || 'application/octet-stream',
           byteSize: file.size,
+          capturedAt: new Date(file.lastModified).toISOString(),
         }),
       })
 
@@ -101,11 +118,15 @@ async function uploadSelectedFiles() {
         throw new Error('스토리지 업로드에 실패했어요.')
       }
 
-      await fetch('/api/media/upload-complete', {
+      const completeResponse = await fetch('/api/media/upload-complete', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ assetId: presign.assetId }),
       })
+
+      if (!completeResponse.ok) {
+        throw new Error('업로드 검증에 실패했어요.')
+      }
     }
 
     uploadMessage.value = '업로드가 완료됐어요.'
@@ -118,21 +139,49 @@ async function uploadSelectedFiles() {
   }
 }
 
-function formatBytes(bytes) {
-  if (!bytes) return '0 KB'
-  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`
-  if (bytes < 1024 * 1024 * 1024) return `${(bytes / 1024 / 1024).toFixed(1)} MB`
-  return `${(bytes / 1024 / 1024 / 1024).toFixed(1)} GB`
+function openAsset(asset) {
+  activeAsset.value = asset
 }
 
-function formatDate(value) {
+function closeAsset() {
+  activeAsset.value = null
+}
+
+function assetDate(asset) {
+  return asset.capturedAt || asset.createdAt
+}
+
+function dayKey(value) {
+  if (!value) return 'unknown'
+  return new Date(value).toISOString().slice(0, 10)
+}
+
+function formatDayLabel(value) {
   if (!value) return '날짜 미정'
   return new Intl.DateTimeFormat('ko-KR', {
+    year: 'numeric',
+    month: 'long',
+    day: 'numeric',
+    weekday: 'long',
+  }).format(new Date(value))
+}
+
+function formatDateTime(value) {
+  if (!value) return '날짜 미정'
+  return new Intl.DateTimeFormat('ko-KR', {
+    year: 'numeric',
     month: 'long',
     day: 'numeric',
     hour: '2-digit',
     minute: '2-digit',
   }).format(new Date(value))
+}
+
+function formatBytes(bytes) {
+  if (!bytes) return '0 KB'
+  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`
+  if (bytes < 1024 * 1024 * 1024) return `${(bytes / 1024 / 1024).toFixed(1)} MB`
+  return `${(bytes / 1024 / 1024 / 1024).toFixed(1)} GB`
 }
 </script>
 
@@ -201,7 +250,7 @@ function formatDate(value) {
       <div class="section-heading">
         <div>
           <p class="eyebrow">Timeline</p>
-          <h2>최근 기록</h2>
+          <h2>날짜별 성장 기록</h2>
         </div>
         <button class="ghost-button" type="button" @click="loadAssets">
           <span aria-hidden="true">↻</span>
@@ -212,22 +261,63 @@ function formatDate(value) {
       <div v-if="assets.length === 0" class="empty-state">
         <div class="empty-visual" aria-hidden="true">♡</div>
         <h3>아직 올라온 기록이 없어요</h3>
-        <p>첫 사진이나 동영상을 올리면 이곳에 시간순으로 쌓입니다.</p>
+        <p>첫 사진이나 동영상을 올리면 날짜별 타임라인으로 쌓입니다.</p>
       </div>
 
-      <div v-else class="gallery-grid">
-        <article v-for="asset in assets" :key="asset.id" class="asset-card">
-          <div class="asset-thumb">
-            <span>{{ asset.mediaType === 'VIDEO' ? '▶' : '□' }}</span>
-            <small>{{ asset.mediaType === 'VIDEO' ? 'Video' : 'Photo' }}</small>
+      <div v-else class="timeline-list">
+        <section v-for="group in timelineGroups" :key="group.key" class="timeline-day">
+          <div class="day-heading">
+            <h3>{{ group.label }}</h3>
+            <span>{{ group.assets.length }}개</span>
           </div>
-          <div class="asset-body">
-            <p>{{ formatDate(asset.createdAt) }}</p>
-            <h3>{{ asset.filename }}</h3>
-            <span>{{ formatBytes(asset.byteSize) }} · {{ asset.uploadStatus }}</span>
+
+          <div class="gallery-grid">
+            <button v-for="asset in group.assets" :key="asset.id" class="asset-card" type="button" @click="openAsset(asset)">
+              <div class="asset-thumb">
+                <span>{{ asset.mediaType === 'VIDEO' ? '▶' : '□' }}</span>
+                <small>{{ asset.mediaType === 'VIDEO' ? 'Video' : 'Photo' }}</small>
+              </div>
+              <div class="asset-body">
+                <p>{{ formatDateTime(assetDate(asset)) }}</p>
+                <h3>{{ asset.filename }}</h3>
+                <span>{{ formatBytes(asset.byteSize) }} · {{ asset.uploadStatus }}</span>
+              </div>
+            </button>
           </div>
-        </article>
+        </section>
       </div>
     </section>
+
+    <div v-if="activeAsset" class="detail-backdrop" @click.self="closeAsset">
+      <article class="detail-panel" role="dialog" aria-modal="true" aria-labelledby="asset-detail-title">
+        <button class="detail-close" type="button" aria-label="닫기" @click="closeAsset">×</button>
+        <div class="detail-preview">
+          <span>{{ activeAsset.mediaType === 'VIDEO' ? '▶' : '□' }}</span>
+          <small>{{ activeAsset.mediaType === 'VIDEO' ? '동영상 미리보기' : '사진 미리보기' }}</small>
+        </div>
+        <div class="detail-info">
+          <p class="eyebrow">{{ activeAsset.mediaType === 'VIDEO' ? 'Video' : 'Photo' }}</p>
+          <h2 id="asset-detail-title">{{ activeAsset.filename }}</h2>
+          <dl>
+            <div>
+              <dt>기록일</dt>
+              <dd>{{ formatDateTime(assetDate(activeAsset)) }}</dd>
+            </div>
+            <div>
+              <dt>파일 크기</dt>
+              <dd>{{ formatBytes(activeAsset.byteSize) }}</dd>
+            </div>
+            <div>
+              <dt>상태</dt>
+              <dd>{{ activeAsset.uploadStatus }}</dd>
+            </div>
+            <div>
+              <dt>타입</dt>
+              <dd>{{ activeAsset.contentType }}</dd>
+            </div>
+          </dl>
+        </div>
+      </article>
+    </div>
   </main>
 </template>

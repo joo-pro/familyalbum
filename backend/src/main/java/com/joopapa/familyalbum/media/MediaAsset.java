@@ -50,13 +50,14 @@ public class MediaAsset {
     protected MediaAsset() {
     }
 
-    public MediaAsset(String originalObjectKey, String originalFilename, String contentType, MediaType mediaType, long byteSize) {
+    public MediaAsset(String originalObjectKey, String originalFilename, String contentType, MediaType mediaType, long byteSize, Instant capturedAt) {
         Instant now = Instant.now();
         this.originalObjectKey = originalObjectKey;
         this.originalFilename = originalFilename;
         this.contentType = contentType;
         this.mediaType = mediaType;
         this.byteSize = byteSize;
+        this.capturedAt = capturedAt;
         this.uploadStatus = UploadStatus.PENDING;
         this.createdAt = now;
         this.updatedAt = now;
@@ -98,8 +99,17 @@ public class MediaAsset {
         return createdAt;
     }
 
+    public Instant getUpdatedAt() {
+        return updatedAt;
+    }
+
     public void markUploaded() {
         this.uploadStatus = UploadStatus.UPLOADED;
+        this.updatedAt = Instant.now();
+    }
+
+    public void markFailed() {
+        this.uploadStatus = UploadStatus.FAILED;
         this.updatedAt = Instant.now();
     }
 }

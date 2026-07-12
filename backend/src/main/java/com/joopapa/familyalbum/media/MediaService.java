@@ -4,7 +4,10 @@ import com.joopapa.familyalbum.storage.StorageProperties;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
+import software.amazon.awssdk.services.s3.S3Client;
 import software.amazon.awssdk.services.s3.model.GetObjectRequest;
+import software.amazon.awssdk.services.s3.model.HeadObjectRequest;
+import software.amazon.awssdk.services.s3.model.NoSuchKeyException;
 import software.amazon.awssdk.services.s3.model.PutObjectRequest;
 import software.amazon.awssdk.services.s3.presigner.S3Presigner;
 import software.amazon.awssdk.services.s3.presigner.model.GetObjectPresignRequest;
@@ -18,18 +21,25 @@ import java.util.UUID;
 @Service
 public class MediaService {
     private final MediaAssetRepository mediaAssetRepository;
+    private final S3Client s3Client;
     private final S3Presigner s3Presigner;
     private final StorageProperties storageProperties;
 
-    public MediaService(MediaAssetRepository mediaAssetRepository, S3Presigner s3Presigner, StorageProperties storageProperties) {
+    public MediaService(
+            MediaAssetRepository mediaAssetRepository,
+            S3Client s3Client,
+            S3Presigner s3Presigner,
+            StorageProperties storageProperties
+    ) {
         this.mediaAssetRepository = mediaAssetRepository;
+        this.s3Client = s3Client;
         this.s3Presigner = s3Presigner;
         this.storageProperties = storageProperties;
     }
 
     @Transactional(readOnly = true)
     public List<MediaDtos.MediaAssetResponse> listAssets() {
-        return mediaAssetRepository.findAll().stream()
+        return mediaAssetRepository.findTimeline().stream()
                 .map(MediaDtos.MediaAssetResponse::from)
                 .toList();
     }
@@ -47,7 +57,8 @@ public class MediaService {
                 cleanFilename(request.filename()),
                 request.contentType(),
                 mediaType,
-                request.byteSize()
+                request.byteSize(),
+                request.capturedAt()
         ));
 
         PutObjectRequest putObjectRequest = PutObjectRequest.builder()
@@ -73,6 +84,7 @@ public class MediaService {
     public MediaDtos.MediaAssetResponse completeUpload(UUID assetId) {
         MediaAsset asset = mediaAssetRepository.findById(assetId)
                 .orElseThrow(() -> new IllegalArgumentException("Media asset not found"));
+        verifyUploadedObject(asset);
         asset.markUploaded();
         return MediaDtos.MediaAssetResponse.from(asset);
     }
@@ -95,6 +107,22 @@ public class MediaService {
                 s3Presigner.presignGetObject(presignRequest).url().toString(),
                 Instant.now().plus(storageProperties.downloadUrlTtl())
         );
+    }
+
+    private void verifyUploadedObject(MediaAsset asset) {
+        try {
+            var response = s3Client.headObject(HeadObjectRequest.builder()
+                    .bucket(storageProperties.bucket())
+                    .key(asset.getOriginalObjectKey())
+                    .build());
+            if (response.contentLength() != asset.getByteSize()) {
+                asset.markFailed();
+                throw new IllegalStateException("Uploaded object size does not match expected file size");
+            }
+        } catch (NoSuchKeyException exception) {
+            asset.markFailed();
+            throw new IllegalStateException("Uploaded object does not exist in storage", exception);
+        }
     }
 
     private static MediaType detectMediaType(String contentType) {

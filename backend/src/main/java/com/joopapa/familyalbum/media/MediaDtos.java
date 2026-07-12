@@ -14,7 +14,8 @@ public final class MediaDtos {
     public record CreateUploadUrlRequest(
             @NotBlank String filename,
             @NotBlank String contentType,
-            @Min(1) long byteSize
+            @Min(1) long byteSize,
+            Instant capturedAt
     ) {
     }
 
@@ -39,6 +40,7 @@ public final class MediaDtos {
             MediaType mediaType,
             long byteSize,
             UploadStatus uploadStatus,
+            Instant capturedAt,
             Instant createdAt
     ) {
         static MediaAssetResponse from(MediaAsset asset) {
@@ -49,6 +51,7 @@ public final class MediaDtos {
                     asset.getMediaType(),
                     asset.getByteSize(),
                     asset.getUploadStatus(),
+                    asset.getCapturedAt(),
                     asset.getCreatedAt()
             );
         }
