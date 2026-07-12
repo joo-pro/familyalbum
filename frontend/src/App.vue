@@ -103,9 +103,10 @@ async function loadNextAssets() {
     const response = await fetch(`/api/media?${params}`)
     if (response.ok) {
       const page = await response.json()
-      assets.value = [...assets.value, ...(page.items ?? [])]
-      nextCursor.value = page.nextCursor ?? null
-      hasMoreAssets.value = Boolean(page.hasMore)
+      const items = Array.isArray(page) ? page : (page.items ?? [])
+      assets.value = nextCursor.value ? [...assets.value, ...items] : items
+      nextCursor.value = Array.isArray(page) ? null : (page.nextCursor ?? null)
+      hasMoreAssets.value = Array.isArray(page) ? false : Boolean(page.hasMore)
       await nextTick()
       setupLoadMoreObserver()
     }
