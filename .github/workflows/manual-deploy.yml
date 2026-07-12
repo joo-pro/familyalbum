@@ -1,0 +1,86 @@
+name: Manual Deploy
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: '배포할 브랜치, 태그, 커밋 SHA'
+        required: true
+        default: 'main'
+        type: string
+
+env:
+  REGISTRY: ghcr.io
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
+
+      - name: Set image names
+        run: |
+          OWNER_LC="${GITHUB_REPOSITORY_OWNER,,}"
+          DEPLOY_SHA="$(git rev-parse HEAD)"
+          echo "IMAGE_BACKEND=${REGISTRY}/${OWNER_LC}/family-album-backend:${DEPLOY_SHA}" >> "$GITHUB_ENV"
+          echo "IMAGE_FRONTEND=${REGISTRY}/${OWNER_LC}/family-album-frontend:${DEPLOY_SHA}" >> "$GITHUB_ENV"
+
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push backend
+        uses: docker/build-push-action@v6
+        with:
+          context: ./backend
+          push: true
+          tags: ${{ env.IMAGE_BACKEND }}
+
+      - name: Build and push frontend
+        uses: docker/build-push-action@v6
+        with:
+          context: ./frontend
+          push: true
+          tags: ${{ env.IMAGE_FRONTEND }}
+
+      - name: Upload compose file
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.LIGHTSAIL_HOST }}
+          username: ${{ secrets.LIGHTSAIL_USER }}
+          key: ${{ secrets.LIGHTSAIL_SSH_KEY }}
+          source: docker-compose.prod.yml
+          target: /opt/familyalbum
+
+      - name: Deploy on Lightsail
+        uses: appleboy/ssh-action@v1.2.0
+        env:
+          IMAGE_BACKEND: ${{ env.IMAGE_BACKEND }}
+          IMAGE_FRONTEND: ${{ env.IMAGE_FRONTEND }}
+          GHCR_USERNAME: ${{ github.actor }}
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          host: ${{ secrets.LIGHTSAIL_HOST }}
+          username: ${{ secrets.LIGHTSAIL_USER }}
+          key: ${{ secrets.LIGHTSAIL_SSH_KEY }}
+          envs: IMAGE_BACKEND,IMAGE_FRONTEND,GHCR_USERNAME,GHCR_TOKEN
+          script: |
+            set -e
+            mkdir -p /opt/familyalbum
+            cd /opt/familyalbum
+            echo "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_USERNAME" --password-stdin
+            export IMAGE_BACKEND="$IMAGE_BACKEND"
+            export IMAGE_FRONTEND="$IMAGE_FRONTEND"
+            docker compose -f docker-compose.prod.yml --env-file .env pull
+            docker compose -f docker-compose.prod.yml --env-file .env up -d --remove-orphans
+            docker image prune -f
