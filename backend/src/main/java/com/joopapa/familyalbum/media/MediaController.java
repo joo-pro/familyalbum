@@ -4,7 +4,6 @@ import jakarta.servlet.http.HttpServletResponse;
 import jakarta.validation.Valid;
 import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.http.HttpHeaders;
-import org.springframework.http.MediaType;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -17,6 +16,8 @@ import org.springframework.web.multipart.MultipartFile;
 import org.springframework.web.servlet.mvc.method.annotation.StreamingResponseBody;
 import org.springframework.web.servlet.view.RedirectView;
 
+import java.net.URLEncoder;
+import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
@@ -64,6 +65,14 @@ public class MediaController {
         return mediaService.createDownloadUrl(assetId);
     }
 
+    @GetMapping("/media/{assetId}/file")
+    StreamingResponseBody downloadMediaFile(@PathVariable UUID assetId, HttpServletResponse response) {
+        MediaAsset asset = mediaService.getAsset(assetId);
+        response.setHeader(HttpHeaders.CONTENT_DISPOSITION, contentDisposition(asset.getOriginalFilename()));
+        response.setContentType(asset.getContentType());
+        return outputStream -> mediaService.writeOriginalFile(assetId, outputStream);
+    }
+
     @PostMapping(value = "/media/download", produces = "application/zip")
     StreamingResponseBody downloadMediaZip(@Valid @RequestBody MediaDtos.BatchMediaRequest request, HttpServletResponse response) {
         response.setHeader(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"familyalbum-media.zip\"");
@@ -78,6 +87,13 @@ public class MediaController {
         return redirectView;
     }
 
+    @GetMapping("/media/{assetId}/thumbnail")
+    RedirectView viewThumbnail(@PathVariable UUID assetId) {
+        RedirectView redirectView = new RedirectView(mediaService.createThumbnailViewUrl(assetId));
+        redirectView.setExposeModelAttributes(false);
+        return redirectView;
+    }
+
     @DeleteMapping("/media/{assetId}")
     MediaDtos.DeleteMediaResponse deleteMedia(@PathVariable UUID assetId) {
         return mediaService.deleteAsset(assetId);
@@ -86,5 +102,10 @@ public class MediaController {
     @PostMapping("/media/delete")
     MediaDtos.DeleteMediaResponse deleteMediaBatch(@Valid @RequestBody MediaDtos.BatchMediaRequest request) {
         return mediaService.deleteAssets(request.assetIds());
+    }
+
+    private static String contentDisposition(String filename) {
+        String encoded = URLEncoder.encode(filename, StandardCharsets.UTF_8).replace("+", "%20");
+        return "attachment; filename=\"download\"; filename*=UTF-8''" + encoded;
     }
 }

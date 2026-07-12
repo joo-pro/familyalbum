@@ -1,6 +1,8 @@
 package com.joopapa.familyalbum.media;
 
 import com.joopapa.familyalbum.storage.StorageProperties;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
@@ -20,6 +22,8 @@ import software.amazon.awssdk.services.s3.presigner.model.PutObjectPresignReques
 
 import java.io.IOException;
 import java.io.OutputStream;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.HashSet;
@@ -32,6 +36,8 @@ import java.util.zip.ZipOutputStream;
 
 @Service
 public class MediaService {
+    private static final Logger log = LoggerFactory.getLogger(MediaService.class);
+
     private final MediaAssetRepository mediaAssetRepository;
     private final S3Client s3Client;
     private final S3Presigner s3Presigner;
@@ -72,16 +78,20 @@ public class MediaService {
                 capturedAt
         ));
 
+        Path uploadFile = null;
         try {
+            uploadFile = Files.createTempFile("familyalbum-upload-", extensionOf(filename));
+            file.transferTo(uploadFile);
             s3Client.putObject(
                     PutObjectRequest.builder()
                             .bucket(storageProperties.bucket())
                             .key(objectKey)
                             .contentType(contentType)
                             .build(),
-                    RequestBody.fromInputStream(file.getInputStream(), file.getSize())
+                    RequestBody.fromFile(uploadFile)
             );
             verifyUploadedObject(asset);
+            generateThumbnailIfVideo(asset, uploadFile);
             asset.markUploaded();
             return MediaDtos.MediaAssetResponse.from(asset);
         } catch (IOException exception) {
@@ -90,6 +100,8 @@ public class MediaService {
         } catch (RuntimeException exception) {
             asset.markFailed();
             throw exception;
+        } finally {
+            deleteTempFile(uploadFile);
         }
     }
 
@@ -130,14 +142,20 @@ public class MediaService {
         MediaAsset asset = mediaAssetRepository.findById(assetId)
                 .orElseThrow(() -> new IllegalArgumentException("Media asset not found"));
         verifyUploadedObject(asset);
+        generateThumbnailFromStorageIfVideo(asset);
         asset.markUploaded();
         return MediaDtos.MediaAssetResponse.from(asset);
     }
 
     @Transactional(readOnly = true)
-    public MediaDtos.DownloadUrlResponse createDownloadUrl(UUID assetId) {
-        MediaAsset asset = mediaAssetRepository.findById(assetId)
+    public MediaAsset getAsset(UUID assetId) {
+        return mediaAssetRepository.findById(assetId)
                 .orElseThrow(() -> new IllegalArgumentException("Media asset not found"));
+    }
+
+    @Transactional(readOnly = true)
+    public MediaDtos.DownloadUrlResponse createDownloadUrl(UUID assetId) {
+        MediaAsset asset = getAsset(assetId);
         GetObjectRequest getObjectRequest = GetObjectRequest.builder()
                 .bucket(storageProperties.bucket())
                 .key(asset.getOriginalObjectKey())
@@ -156,27 +174,35 @@ public class MediaService {
 
     @Transactional(readOnly = true)
     public String createViewUrl(UUID assetId) {
-        MediaAsset asset = mediaAssetRepository.findById(assetId)
-                .orElseThrow(() -> new IllegalArgumentException("Media asset not found"));
-        GetObjectRequest getObjectRequest = GetObjectRequest.builder()
+        MediaAsset asset = getAsset(assetId);
+        return createInlineUrl(asset.getOriginalObjectKey(), asset.getContentType(), asset.getOriginalFilename());
+    }
+
+    @Transactional
+    public String createThumbnailViewUrl(UUID assetId) {
+        MediaAsset asset = getAsset(assetId);
+        generateThumbnailFromStorageIfVideo(asset);
+        if (!asset.hasThumbnail()) {
+            return createViewUrl(assetId);
+        }
+        return createInlineUrl(asset.getThumbnailObjectKey(), "image/jpeg", stemOf(asset.getOriginalFilename()) + ".jpg");
+    }
+
+    @Transactional(readOnly = true)
+    public void writeOriginalFile(UUID assetId, OutputStream outputStream) throws IOException {
+        MediaAsset asset = getAsset(assetId);
+        try (ResponseInputStream<GetObjectResponse> objectStream = s3Client.getObject(GetObjectRequest.builder()
                 .bucket(storageProperties.bucket())
                 .key(asset.getOriginalObjectKey())
-                .responseContentType(asset.getContentType())
-                .responseContentDisposition("inline; filename=\"" + asset.getOriginalFilename() + "\"")
-                .build();
-        GetObjectPresignRequest presignRequest = GetObjectPresignRequest.builder()
-                .signatureDuration(storageProperties.downloadUrlTtl())
-                .getObjectRequest(getObjectRequest)
-                .build();
-
-        return s3Presigner.presignGetObject(presignRequest).url().toString();
+                .build())) {
+            objectStream.transferTo(outputStream);
+        }
     }
 
     @Transactional
     public MediaDtos.DeleteMediaResponse deleteAsset(UUID assetId) {
-        MediaAsset asset = mediaAssetRepository.findById(assetId)
-                .orElseThrow(() -> new IllegalArgumentException("Media asset not found"));
-        deleteObject(asset);
+        MediaAsset asset = getAsset(assetId);
+        deleteObjects(asset);
         mediaAssetRepository.delete(asset);
         return new MediaDtos.DeleteMediaResponse(1);
     }
@@ -185,7 +211,7 @@ public class MediaService {
     public MediaDtos.DeleteMediaResponse deleteAssets(List<UUID> assetIds) {
         List<MediaAsset> assets = findAssets(assetIds);
         for (MediaAsset asset : assets) {
-            deleteObject(asset);
+            deleteObjects(asset);
         }
         mediaAssetRepository.deleteAll(assets);
         return new MediaDtos.DeleteMediaResponse(assets.size());
@@ -210,6 +236,21 @@ public class MediaService {
         }
     }
 
+    private String createInlineUrl(String objectKey, String contentType, String filename) {
+        GetObjectRequest getObjectRequest = GetObjectRequest.builder()
+                .bucket(storageProperties.bucket())
+                .key(objectKey)
+                .responseContentType(contentType)
+                .responseContentDisposition("inline; filename=\"" + filename + "\"")
+                .build();
+        GetObjectPresignRequest presignRequest = GetObjectPresignRequest.builder()
+                .signatureDuration(storageProperties.downloadUrlTtl())
+                .getObjectRequest(getObjectRequest)
+                .build();
+
+        return s3Presigner.presignGetObject(presignRequest).url().toString();
+    }
+
     private List<MediaAsset> findAssets(List<UUID> assetIds) {
         if (assetIds == null || assetIds.isEmpty()) {
             throw new IllegalArgumentException("At least one media asset is required");
@@ -221,22 +262,81 @@ public class MediaService {
         return assets;
     }
 
-    private void deleteObject(MediaAsset asset) {
+    private void deleteObjects(MediaAsset asset) {
+        deleteObject(asset.getOriginalObjectKey());
+        if (asset.hasThumbnail()) {
+            deleteObject(asset.getThumbnailObjectKey());
+        }
+    }
+
+    private void deleteObject(String objectKey) {
         s3Client.deleteObject(DeleteObjectRequest.builder()
                 .bucket(storageProperties.bucket())
-                .key(asset.getOriginalObjectKey())
+                .key(objectKey)
                 .build());
     }
 
-    private static String uniqueZipName(MediaAsset asset, Set<String> usedNames) {
-        String filename = cleanFilename(asset.getOriginalFilename());
-        String candidate = filename;
-        int counter = 2;
-        while (!usedNames.add(candidate)) {
-            candidate = stemOf(filename) + "-" + counter + extensionOf(filename);
-            counter++;
+    private void generateThumbnailFromStorageIfVideo(MediaAsset asset) {
+        if (asset.getMediaType() != MediaType.VIDEO || asset.hasThumbnail()) {
+            return;
         }
-        return candidate;
+        Path originalFile = null;
+        try {
+            originalFile = Files.createTempFile("familyalbum-original-", extensionOf(asset.getOriginalFilename()));
+            try (ResponseInputStream<GetObjectResponse> objectStream = s3Client.getObject(GetObjectRequest.builder()
+                    .bucket(storageProperties.bucket())
+                    .key(asset.getOriginalObjectKey())
+                    .build())) {
+                Files.copy(objectStream, originalFile, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+            }
+            generateThumbnailIfVideo(asset, originalFile);
+        } catch (IOException exception) {
+            log.warn("Failed to prepare video thumbnail source for {}", asset.getId(), exception);
+        } finally {
+            deleteTempFile(originalFile);
+        }
+    }
+
+    private void generateThumbnailIfVideo(MediaAsset asset, Path originalFile) {
+        if (asset.getMediaType() != MediaType.VIDEO || originalFile == null || asset.hasThumbnail()) {
+            return;
+        }
+        Path thumbnailFile = null;
+        try {
+            thumbnailFile = Files.createTempFile("familyalbum-thumbnail-", ".jpg");
+            Process process = new ProcessBuilder(
+                    "ffmpeg",
+                    "-y",
+                    "-ss", "00:00:01",
+                    "-i", originalFile.toString(),
+                    "-frames:v", "1",
+                    "-vf", "scale=640:-2",
+                    "-q:v", "4",
+                    thumbnailFile.toString()
+            ).redirectErrorStream(true).start();
+            int exitCode = process.waitFor();
+            if (exitCode != 0 || Files.size(thumbnailFile) == 0) {
+                log.warn("ffmpeg thumbnail generation failed for asset {} with exit code {}", asset.getId(), exitCode);
+                return;
+            }
+            String thumbnailObjectKey = createThumbnailObjectKey(asset.getOriginalFilename());
+            s3Client.putObject(
+                    PutObjectRequest.builder()
+                            .bucket(storageProperties.bucket())
+                            .key(thumbnailObjectKey)
+                            .contentType("image/jpeg")
+                            .build(),
+                    RequestBody.fromFile(thumbnailFile)
+            );
+            asset.setThumbnailObjectKey(thumbnailObjectKey);
+        } catch (IOException exception) {
+            log.warn("Failed to generate video thumbnail for {}", asset.getId(), exception);
+        } catch (InterruptedException exception) {
+            Thread.currentThread().interrupt();
+            log.warn("Video thumbnail generation was interrupted for {}", asset.getId(), exception);
+        } finally {
+            deleteTempFile(thumbnailFile);
+        }
     }
 
     private void verifyUploadedObject(MediaAsset asset) {
@@ -263,6 +363,13 @@ public class MediaService {
         );
     }
 
+    private static String createThumbnailObjectKey(String filename) {
+        return "thumbnails/%s/%s.jpg".formatted(
+                Instant.now().toString().substring(0, 10).replace("-", "/"),
+                UUID.randomUUID()
+        );
+    }
+
     private static MediaType detectMediaType(String contentType) {
         String lower = contentType.toLowerCase(Locale.ROOT);
         if (lower.startsWith("image/")) {
@@ -286,6 +393,17 @@ public class MediaService {
         return cleaned.isBlank() ? "upload" : cleaned;
     }
 
+    private static String uniqueZipName(MediaAsset asset, Set<String> usedNames) {
+        String filename = cleanFilename(asset.getOriginalFilename());
+        String candidate = filename;
+        int counter = 2;
+        while (!usedNames.add(candidate)) {
+            candidate = stemOf(filename) + "-" + counter + extensionOf(filename);
+            counter++;
+        }
+        return candidate;
+    }
+
     private static String stemOf(String filename) {
         String cleaned = cleanFilename(filename);
         int dotIndex = cleaned.lastIndexOf('.');
@@ -302,5 +420,16 @@ public class MediaService {
             return "";
         }
         return cleaned.substring(dotIndex).toLowerCase(Locale.ROOT);
+    }
+
+    private static void deleteTempFile(Path path) {
+        if (path == null) {
+            return;
+        }
+        try {
+            Files.deleteIfExists(path);
+        } catch (IOException exception) {
+            log.warn("Failed to delete temp file {}", path, exception);
+        }
     }
 }

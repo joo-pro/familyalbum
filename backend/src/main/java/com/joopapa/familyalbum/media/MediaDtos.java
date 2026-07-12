@@ -48,7 +48,8 @@ public final class MediaDtos {
             long byteSize,
             UploadStatus uploadStatus,
             Instant capturedAt,
-            Instant createdAt
+            Instant createdAt,
+            boolean hasThumbnail
     ) {
         static MediaAssetResponse from(MediaAsset asset) {
             return new MediaAssetResponse(
@@ -59,7 +60,8 @@ public final class MediaDtos {
                     asset.getByteSize(),
                     asset.getUploadStatus(),
                     asset.getCapturedAt(),
-                    asset.getCreatedAt()
+                    asset.getCreatedAt(),
+                    asset.hasThumbnail()
             );
         }
     }

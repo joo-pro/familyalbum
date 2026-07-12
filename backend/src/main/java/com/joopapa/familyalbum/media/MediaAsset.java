@@ -22,6 +22,9 @@ public class MediaAsset {
     @Column(nullable = false, unique = true, length = 1024)
     private String originalObjectKey;
 
+    @Column(length = 1024)
+    private String thumbnailObjectKey;
+
     @Column(nullable = false, length = 512)
     private String originalFilename;
 
@@ -71,6 +74,10 @@ public class MediaAsset {
         return originalObjectKey;
     }
 
+    public String getThumbnailObjectKey() {
+        return thumbnailObjectKey;
+    }
+
     public String getOriginalFilename() {
         return originalFilename;
     }
@@ -101,6 +108,15 @@ public class MediaAsset {
 
     public Instant getUpdatedAt() {
         return updatedAt;
+    }
+
+    public boolean hasThumbnail() {
+        return thumbnailObjectKey != null && !thumbnailObjectKey.isBlank();
+    }
+
+    public void setThumbnailObjectKey(String thumbnailObjectKey) {
+        this.thumbnailObjectKey = thumbnailObjectKey;
+        this.updatedAt = Instant.now();
     }
 
     public void markUploaded() {

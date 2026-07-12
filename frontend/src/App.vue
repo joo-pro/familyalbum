@@ -23,6 +23,11 @@ const videoCount = computed(() => assets.value.filter((asset) => asset.mediaType
 const totalSize = computed(() => selectedFiles.value.reduce((sum, file) => sum + file.size, 0))
 const selectedCount = computed(() => selectedAssetIds.value.size)
 const selectedAssetIdList = computed(() => Array.from(selectedAssetIds.value))
+const isMobileDevice = computed(() => {
+  if (typeof navigator === 'undefined') return false
+  return /Android|iPhone|iPad|iPod/i.test(navigator.userAgent) || navigator.maxTouchPoints > 1
+})
+const downloadActionLabel = computed(() => (isMobileDevice.value ? '공유/저장' : '다운로드'))
 const uploadButtonLabel = computed(() => {
   if (isUploading.value) return '업로드 중'
   if (selectedFiles.value.length > 0) return `${selectedFiles.value.length}개 업로드`
@@ -66,7 +71,7 @@ async function checkApi() {
     const response = await fetch('/api/health')
     apiStatus.value = response.ok ? '연결됨' : '응답 오류'
   } catch {
-    apiStatus.value = '연결 안 됨'
+    apiStatus.value = '연결 안됨'
   }
 }
 
@@ -166,6 +171,11 @@ function clearSelection() {
 }
 
 async function downloadAsset(asset) {
+  if (isMobileDevice.value) {
+    await shareAssets([asset])
+    return
+  }
+
   const response = await fetch(`/api/media/${asset.id}/download-url`, { method: 'POST' })
   if (!response.ok) throw new Error('다운로드 링크를 만들지 못했어요.')
   const payload = await response.json()
@@ -174,6 +184,13 @@ async function downloadAsset(asset) {
 
 async function downloadSelectedAssets() {
   if (selectedCount.value === 0) return
+  const selectedAssets = assets.value.filter((asset) => selectedAssetIds.value.has(asset.id))
+
+  if (isMobileDevice.value) {
+    await shareAssets(selectedAssets)
+    return
+  }
+
   const response = await fetch('/api/media/download', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -189,6 +206,34 @@ async function downloadSelectedAssets() {
   link.click()
   link.remove()
   URL.revokeObjectURL(url)
+}
+
+async function shareAssets(targetAssets) {
+  const files = []
+  for (const asset of targetAssets) {
+    const response = await fetch(`/api/media/${asset.id}/file`)
+    if (!response.ok) throw new Error('공유할 파일을 준비하지 못했어요.')
+    const blob = await response.blob()
+    files.push(new File([blob], asset.filename, { type: asset.contentType }))
+  }
+
+  if (navigator.canShare?.({ files })) {
+    await navigator.share({
+      files,
+      title: appConfig.value.appTitle,
+      text: 'FamilyAlbum에서 저장할 사진과 동영상이에요.',
+    })
+    return
+  }
+
+  if (files.length === 1) {
+    const url = URL.createObjectURL(files[0])
+    window.open(url, '_blank', 'noopener')
+    window.setTimeout(() => URL.revokeObjectURL(url), 60_000)
+    return
+  }
+
+  throw new Error('이 브라우저에서는 여러 파일을 사진첩으로 공유할 수 없어요. 한 개씩 저장해 주세요.')
 }
 
 async function deleteAsset(asset) {
@@ -215,6 +260,13 @@ async function deleteSelectedAssets() {
 
 function mediaViewUrl(asset) {
   return `/api/media/${asset.id}/view`
+}
+
+function mediaThumbnailUrl(asset) {
+  if (asset.mediaType === 'VIDEO') {
+    return `/api/media/${asset.id}/thumbnail`
+  }
+  return mediaViewUrl(asset)
 }
 
 function assetDate(asset) {
@@ -337,13 +389,13 @@ function formatBytes(bytes) {
       <div v-if="isSelectionMode" class="selection-toolbar">
         <strong>{{ selectedCount }}개 선택됨</strong>
         <div>
-          <button type="button" :disabled="selectedCount === 0" @click="downloadSelectedAssets">다운로드</button>
+          <button type="button" :disabled="selectedCount === 0" @click="downloadSelectedAssets">{{ downloadActionLabel }}</button>
           <button type="button" :disabled="selectedCount === 0" class="danger-button" @click="deleteSelectedAssets">삭제</button>
         </div>
       </div>
 
       <div v-if="assets.length === 0" class="empty-state">
-        <div class="empty-visual" aria-hidden="true">♡</div>
+        <div class="empty-visual" aria-hidden="true">+</div>
         <h3>아직 올라온 기록이 없어요</h3>
         <p>첫 사진이나 동영상을 올리면 날짜별 타임라인으로 쌓입니다.</p>
       </div>
@@ -366,14 +418,7 @@ function formatBytes(bytes) {
               @click="handleAssetClick(asset)"
             >
               <div class="asset-thumb">
-                <video
-                  v-if="asset.mediaType === 'VIDEO'"
-                  :src="mediaViewUrl(asset)"
-                  preload="metadata"
-                  muted
-                  playsinline
-                ></video>
-                <img v-else :src="mediaViewUrl(asset)" :alt="asset.filename" loading="lazy" />
+                <img :src="mediaThumbnailUrl(asset)" :alt="asset.filename" loading="lazy" />
                 <span v-if="asset.mediaType === 'VIDEO'" class="video-badge" aria-hidden="true">▶</span>
                 <span v-if="isSelectionMode" class="select-badge" :class="{ 'is-on': isSelected(asset.id) }" aria-hidden="true">
                   {{ isSelected(asset.id) ? '✓' : '' }}
@@ -392,6 +437,7 @@ function formatBytes(bytes) {
           <video
             v-if="activeAsset.mediaType === 'VIDEO'"
             :src="mediaViewUrl(activeAsset)"
+            :poster="mediaThumbnailUrl(activeAsset)"
             controls
             playsinline
           ></video>
@@ -401,7 +447,7 @@ function formatBytes(bytes) {
           <p class="eyebrow">{{ activeAsset.mediaType === 'VIDEO' ? 'Video' : 'Photo' }}</p>
           <h2 id="asset-detail-title">{{ activeAsset.filename }}</h2>
           <div class="detail-actions">
-            <button type="button" @click="downloadAsset(activeAsset)">다운로드</button>
+            <button type="button" @click="downloadAsset(activeAsset)">{{ downloadActionLabel }}</button>
             <button type="button" class="danger-button" @click="deleteAsset(activeAsset)">삭제</button>
           </div>
           <dl>

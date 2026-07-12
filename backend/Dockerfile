@@ -9,6 +9,7 @@ RUN ./mvnw -B -DskipTests package
 
 FROM eclipse-temurin:21-jre-alpine
 WORKDIR /app
+RUN apk add --no-cache ffmpeg
 RUN addgroup -S familyalbum && adduser -S familyalbum -G familyalbum
 COPY --from=build /app/target/family-album-0.0.1-SNAPSHOT.jar app.jar
 USER familyalbum
