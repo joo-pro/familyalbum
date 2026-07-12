@@ -1,8 +1,7 @@
 @font-face {
-  font-family: 'NanumJangMiCe';
-  src: url('./NanumJangMiCe.ttf') format('truetype');
-  font-weight: 400;
-  font-style: normal;
+  font-family: 'Paperozi';
+  src: url('https://cdn.jsdelivr.net/gh/projectnoonnu/2408-3@1.0/Paperlogy-6SemiBold.woff2') format('woff2');
+  font-weight: 600;
   font-display: swap;
 }
 
@@ -10,7 +9,7 @@
   color: #1e3550;
   background: #eef8ff;
   font-family:
-    'NanumJangMiCe',
+    'Paperozi',
     ui-sans-serif,
     system-ui,
     -apple-system,

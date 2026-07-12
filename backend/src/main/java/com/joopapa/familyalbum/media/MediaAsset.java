@@ -25,6 +25,9 @@ public class MediaAsset {
     @Column(length = 1024)
     private String thumbnailObjectKey;
 
+    @Column(length = 64)
+    private String contentHash;
+
     @Column(nullable = false, length = 512)
     private String originalFilename;
 
@@ -78,6 +81,10 @@ public class MediaAsset {
         return thumbnailObjectKey;
     }
 
+    public String getContentHash() {
+        return contentHash;
+    }
+
     public String getOriginalFilename() {
         return originalFilename;
     }
@@ -116,6 +123,11 @@ public class MediaAsset {
 
     public void setThumbnailObjectKey(String thumbnailObjectKey) {
         this.thumbnailObjectKey = thumbnailObjectKey;
+        this.updatedAt = Instant.now();
+    }
+
+    public void setContentHash(String contentHash) {
+        this.contentHash = contentHash;
         this.updatedAt = Instant.now();
     }
 

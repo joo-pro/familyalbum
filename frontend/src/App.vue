@@ -86,6 +86,9 @@ async function uploadSelectedFiles() {
   uploadMessage.value = '업로드를 준비하고 있어요.'
 
   try {
+    let uploadedCount = 0
+    let duplicateCount = 0
+
     for (const file of selectedFiles.value) {
       uploadMessage.value = `${file.name} 업로드 중이에요.`
 
@@ -102,9 +105,18 @@ async function uploadSelectedFiles() {
         const message = await response.text()
         throw new Error(message || '업로드에 실패했어요.')
       }
+
+      const result = await response.json()
+      if (result.duplicate) {
+        duplicateCount += 1
+      } else {
+        uploadedCount += 1
+      }
     }
 
-    uploadMessage.value = '업로드가 완료됐어요.'
+    uploadMessage.value = duplicateCount > 0
+      ? `업로드 완료: 새 파일 ${uploadedCount}개, 중복 ${duplicateCount}개 건너뜀`
+      : '업로드가 완료됐어요.'
     selectedFiles.value = []
     await loadAssets()
   } catch (error) {

@@ -49,9 +49,14 @@ public final class MediaDtos {
             UploadStatus uploadStatus,
             Instant capturedAt,
             Instant createdAt,
-            boolean hasThumbnail
+            boolean hasThumbnail,
+            boolean duplicate
     ) {
         static MediaAssetResponse from(MediaAsset asset) {
+            return from(asset, false);
+        }
+
+        static MediaAssetResponse from(MediaAsset asset, boolean duplicate) {
             return new MediaAssetResponse(
                     asset.getId(),
                     asset.getOriginalFilename(),
@@ -61,7 +66,8 @@ public final class MediaDtos {
                     asset.getUploadStatus(),
                     asset.getCapturedAt(),
                     asset.getCreatedAt(),
-                    asset.hasThumbnail()
+                    asset.hasThumbnail(),
+                    duplicate
             );
         }
     }

@@ -24,6 +24,9 @@ import java.io.IOException;
 import java.io.OutputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.security.DigestInputStream;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.HashSet;
@@ -67,21 +70,31 @@ public class MediaService {
         String contentType = normalizeContentType(file.getContentType());
         MediaType mediaType = detectMediaType(contentType);
         String filename = cleanFilename(file.getOriginalFilename());
-        String objectKey = createOriginalObjectKey(filename);
-
-        MediaAsset asset = mediaAssetRepository.save(new MediaAsset(
-                objectKey,
-                filename,
-                contentType,
-                mediaType,
-                file.getSize(),
-                capturedAt
-        ));
 
         Path uploadFile = null;
+        MediaAsset asset = null;
         try {
             uploadFile = Files.createTempFile("familyalbum-upload-", extensionOf(filename));
             file.transferTo(uploadFile);
+            String contentHash = sha256Hex(uploadFile);
+            MediaAsset duplicate = mediaAssetRepository
+                    .findFirstByContentHashAndUploadStatus(contentHash, UploadStatus.UPLOADED)
+                    .orElse(null);
+            if (duplicate != null) {
+                return MediaDtos.MediaAssetResponse.from(duplicate, true);
+            }
+
+            String objectKey = createOriginalObjectKey(filename);
+            asset = mediaAssetRepository.save(new MediaAsset(
+                    objectKey,
+                    filename,
+                    contentType,
+                    mediaType,
+                    file.getSize(),
+                    capturedAt
+            ));
+            asset.setContentHash(contentHash);
+
             s3Client.putObject(
                     PutObjectRequest.builder()
                             .bucket(storageProperties.bucket())
@@ -95,10 +108,14 @@ public class MediaService {
             asset.markUploaded();
             return MediaDtos.MediaAssetResponse.from(asset);
         } catch (IOException exception) {
-            asset.markFailed();
+            if (asset != null) {
+                asset.markFailed();
+            }
             throw new IllegalStateException("Failed to read uploaded file", exception);
         } catch (RuntimeException exception) {
-            asset.markFailed();
+            if (asset != null) {
+                asset.markFailed();
+            }
             throw exception;
         } finally {
             deleteTempFile(uploadFile);
@@ -319,7 +336,7 @@ public class MediaService {
                 log.warn("ffmpeg thumbnail generation failed for asset {} with exit code {}", asset.getId(), exitCode);
                 return;
             }
-            String thumbnailObjectKey = createThumbnailObjectKey(asset.getOriginalFilename());
+            String thumbnailObjectKey = createThumbnailObjectKey();
             s3Client.putObject(
                     PutObjectRequest.builder()
                             .bucket(storageProperties.bucket())
@@ -355,6 +372,24 @@ public class MediaService {
         }
     }
 
+    private static String sha256Hex(Path file) {
+        try {
+            MessageDigest digest = MessageDigest.getInstance("SHA-256");
+            try (DigestInputStream stream = new DigestInputStream(Files.newInputStream(file), digest)) {
+                stream.transferTo(OutputStream.nullOutputStream());
+            }
+            StringBuilder builder = new StringBuilder();
+            for (byte value : digest.digest()) {
+                builder.append(String.format("%02x", value));
+            }
+            return builder.toString();
+        } catch (IOException exception) {
+            throw new IllegalStateException("Failed to hash uploaded file", exception);
+        } catch (NoSuchAlgorithmException exception) {
+            throw new IllegalStateException("SHA-256 is not available", exception);
+        }
+    }
+
     private static String createOriginalObjectKey(String filename) {
         return "originals/%s/%s%s".formatted(
                 Instant.now().toString().substring(0, 10).replace("-", "/"),
@@ -363,7 +398,7 @@ public class MediaService {
         );
     }
 
-    private static String createThumbnailObjectKey(String filename) {
+    private static String createThumbnailObjectKey() {
         return "thumbnails/%s/%s.jpg".formatted(
                 Instant.now().toString().substring(0, 10).replace("-", "/"),
                 UUID.randomUUID()

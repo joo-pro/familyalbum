@@ -4,6 +4,7 @@ import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 
 public interface MediaAssetRepository extends JpaRepository<MediaAsset, UUID> {
@@ -14,4 +15,6 @@ public interface MediaAssetRepository extends JpaRepository<MediaAsset, UUID> {
             order by coalesce(asset.capturedAt, asset.createdAt) desc, asset.createdAt desc
             """)
     List<MediaAsset> findTimeline();
+
+    Optional<MediaAsset> findFirstByContentHashAndUploadStatus(String contentHash, UploadStatus uploadStatus);
 }
