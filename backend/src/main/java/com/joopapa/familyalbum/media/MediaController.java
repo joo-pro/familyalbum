@@ -10,6 +10,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.multipart.MultipartFile;
+import org.springframework.web.servlet.view.RedirectView;
 
 import java.time.Instant;
 import java.util.List;
@@ -56,5 +57,12 @@ public class MediaController {
     @PostMapping("/media/{assetId}/download-url")
     MediaDtos.DownloadUrlResponse createDownloadUrl(@PathVariable UUID assetId) {
         return mediaService.createDownloadUrl(assetId);
+    }
+
+    @GetMapping("/media/{assetId}/view")
+    RedirectView viewMedia(@PathVariable UUID assetId) {
+        RedirectView redirectView = new RedirectView(mediaService.createViewUrl(assetId));
+        redirectView.setExposeModelAttributes(false);
+        return redirectView;
     }
 }

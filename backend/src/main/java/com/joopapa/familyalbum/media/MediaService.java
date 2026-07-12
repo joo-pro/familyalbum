@@ -145,6 +145,24 @@ public class MediaService {
         );
     }
 
+    @Transactional(readOnly = true)
+    public String createViewUrl(UUID assetId) {
+        MediaAsset asset = mediaAssetRepository.findById(assetId)
+                .orElseThrow(() -> new IllegalArgumentException("Media asset not found"));
+        GetObjectRequest getObjectRequest = GetObjectRequest.builder()
+                .bucket(storageProperties.bucket())
+                .key(asset.getOriginalObjectKey())
+                .responseContentType(asset.getContentType())
+                .responseContentDisposition("inline; filename=\"" + asset.getOriginalFilename() + "\"")
+                .build();
+        GetObjectPresignRequest presignRequest = GetObjectPresignRequest.builder()
+                .signatureDuration(storageProperties.downloadUrlTtl())
+                .getObjectRequest(getObjectRequest)
+                .build();
+
+        return s3Presigner.presignGetObject(presignRequest).url().toString();
+    }
+
     private void verifyUploadedObject(MediaAsset asset) {
         try {
             var response = s3Client.headObject(HeadObjectRequest.builder()

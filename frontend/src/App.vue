@@ -125,6 +125,10 @@ function closeAsset() {
   activeAsset.value = null
 }
 
+function mediaViewUrl(asset) {
+  return `/api/media/${asset.id}/view`
+}
+
 function assetDate(asset) {
   return asset.capturedAt || asset.createdAt
 }
@@ -250,15 +254,24 @@ function formatBytes(bytes) {
           </div>
 
           <div class="gallery-grid">
-            <button v-for="asset in group.assets" :key="asset.id" class="asset-card" type="button" @click="openAsset(asset)">
+            <button
+              v-for="asset in group.assets"
+              :key="asset.id"
+              class="asset-card"
+              type="button"
+              :aria-label="`${asset.filename} 자세히 보기`"
+              @click="openAsset(asset)"
+            >
               <div class="asset-thumb">
-                <span>{{ asset.mediaType === 'VIDEO' ? '▶' : '□' }}</span>
-                <small>{{ asset.mediaType === 'VIDEO' ? 'Video' : 'Photo' }}</small>
-              </div>
-              <div class="asset-body">
-                <p>{{ formatDateTime(assetDate(asset)) }}</p>
-                <h3>{{ asset.filename }}</h3>
-                <span>{{ formatBytes(asset.byteSize) }} · {{ asset.uploadStatus }}</span>
+                <video
+                  v-if="asset.mediaType === 'VIDEO'"
+                  :src="mediaViewUrl(asset)"
+                  preload="metadata"
+                  muted
+                  playsinline
+                ></video>
+                <img v-else :src="mediaViewUrl(asset)" :alt="asset.filename" loading="lazy" />
+                <span v-if="asset.mediaType === 'VIDEO'" class="video-badge" aria-hidden="true">▶</span>
               </div>
             </button>
           </div>
@@ -270,8 +283,13 @@ function formatBytes(bytes) {
       <article class="detail-panel" role="dialog" aria-modal="true" aria-labelledby="asset-detail-title">
         <button class="detail-close" type="button" aria-label="닫기" @click="closeAsset">×</button>
         <div class="detail-preview">
-          <span>{{ activeAsset.mediaType === 'VIDEO' ? '▶' : '□' }}</span>
-          <small>{{ activeAsset.mediaType === 'VIDEO' ? '동영상 미리보기' : '사진 미리보기' }}</small>
+          <video
+            v-if="activeAsset.mediaType === 'VIDEO'"
+            :src="mediaViewUrl(activeAsset)"
+            controls
+            playsinline
+          ></video>
+          <img v-else :src="mediaViewUrl(activeAsset)" :alt="activeAsset.filename" />
         </div>
         <div class="detail-info">
           <p class="eyebrow">{{ activeAsset.mediaType === 'VIDEO' ? 'Video' : 'Photo' }}</p>
