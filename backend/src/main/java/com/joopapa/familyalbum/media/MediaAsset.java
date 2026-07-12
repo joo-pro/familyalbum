@@ -25,6 +25,12 @@ public class MediaAsset {
     @Column(length = 1024)
     private String thumbnailObjectKey;
 
+    @Column(length = 1024)
+    private String previewObjectKey;
+
+    @Column(length = 255)
+    private String previewContentType;
+
     @Column(length = 64)
     private String contentHash;
 
@@ -81,6 +87,14 @@ public class MediaAsset {
         return thumbnailObjectKey;
     }
 
+    public String getPreviewObjectKey() {
+        return previewObjectKey;
+    }
+
+    public String getPreviewContentType() {
+        return previewContentType;
+    }
+
     public String getContentHash() {
         return contentHash;
     }
@@ -121,8 +135,18 @@ public class MediaAsset {
         return thumbnailObjectKey != null && !thumbnailObjectKey.isBlank();
     }
 
+    public boolean hasPreview() {
+        return previewObjectKey != null && !previewObjectKey.isBlank();
+    }
+
     public void setThumbnailObjectKey(String thumbnailObjectKey) {
         this.thumbnailObjectKey = thumbnailObjectKey;
+        this.updatedAt = Instant.now();
+    }
+
+    public void setPreview(String previewObjectKey, String previewContentType) {
+        this.previewObjectKey = previewObjectKey;
+        this.previewContentType = previewContentType;
         this.updatedAt = Instant.now();
     }
 

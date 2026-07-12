@@ -13,6 +13,11 @@ const uploadMessage = ref('')
 const activeAsset = ref(null)
 const isSelectionMode = ref(false)
 const selectedAssetIds = ref(new Set())
+const isActionMenuOpen = ref(false)
+const isDetailMenuOpen = ref(false)
+const isDetailInfoOpen = ref(false)
+const touchStartX = ref(null)
+const fileInput = ref(null)
 
 const totalSize = computed(() => selectedFiles.value.reduce((sum, file) => sum + file.size, 0))
 const selectedCount = computed(() => selectedAssetIds.value.size)
@@ -28,7 +33,7 @@ const downloadActionLabel = computed(() => (isMobileDevice.value ? '공유/저�
 const uploadButtonLabel = computed(() => {
   if (isUploading.value) return '업로드 중'
   if (selectedFiles.value.length > 0) return `${selectedFiles.value.length}개 업로드`
-  return '파일 선택 후 업로드'
+  return '업로드'
 })
 const timelineGroups = computed(() => {
   const groups = new Map()
@@ -74,6 +79,11 @@ async function loadAssets() {
   }
 }
 
+function openFilePicker() {
+  fileInput.value?.click()
+  isActionMenuOpen.value = false
+}
+
 function onFileChange(event) {
   selectedFiles.value = Array.from(event.target.files ?? [])
   uploadMessage.value = ''
@@ -82,6 +92,7 @@ function onFileChange(event) {
 async function uploadSelectedFiles() {
   if (selectedFiles.value.length === 0) return
 
+  isActionMenuOpen.value = false
   isUploading.value = true
   uploadMessage.value = '업로드를 준비하고 있어요.'
 
@@ -118,6 +129,7 @@ async function uploadSelectedFiles() {
       ? `업로드 완료: 새 파일 ${uploadedCount}개, 중복 ${duplicateCount}개 건너뜀`
       : '업로드가 완료됐어요.'
     selectedFiles.value = []
+    if (fileInput.value) fileInput.value.value = ''
     await loadAssets()
   } catch (error) {
     uploadMessage.value = error.message
@@ -136,24 +148,55 @@ function handleAssetClick(asset) {
 
 function openAsset(asset) {
   activeAsset.value = asset
+  isDetailMenuOpen.value = false
+  isDetailInfoOpen.value = false
 }
 
 function closeAsset() {
   activeAsset.value = null
+  isDetailMenuOpen.value = false
+  isDetailInfoOpen.value = false
+}
+
+function toggleDetailInfo() {
+  isDetailInfoOpen.value = !isDetailInfoOpen.value
+  isDetailMenuOpen.value = false
+}
+
+function onDetailTouchStart(event) {
+  touchStartX.value = event.changedTouches?.[0]?.clientX ?? null
+}
+
+function onDetailTouchEnd(event) {
+  if (touchStartX.value == null) return
+  const endX = event.changedTouches?.[0]?.clientX ?? touchStartX.value
+  const deltaX = endX - touchStartX.value
+  touchStartX.value = null
+  if (Math.abs(deltaX) < 48) return
+  if (deltaX < 0) {
+    showNextAsset()
+  } else {
+    showPreviousAsset()
+  }
 }
 
 function showPreviousAsset() {
   if (!hasPreviousAsset.value) return
   activeAsset.value = assets.value[activeIndex.value - 1]
+  isDetailMenuOpen.value = false
+  isDetailInfoOpen.value = false
 }
 
 function showNextAsset() {
   if (!hasNextAsset.value) return
   activeAsset.value = assets.value[activeIndex.value + 1]
+  isDetailMenuOpen.value = false
+  isDetailInfoOpen.value = false
 }
 
 function toggleSelectionMode() {
   isSelectionMode.value = !isSelectionMode.value
+  isActionMenuOpen.value = false
   if (!isSelectionMode.value) {
     clearSelection()
   }
@@ -180,7 +223,13 @@ function clearSelection() {
   selectedAssetIds.value = new Set()
 }
 
+async function refreshAssets() {
+  isActionMenuOpen.value = false
+  await loadAssets()
+}
+
 async function downloadAsset(asset) {
+  isDetailMenuOpen.value = false
   if (isMobileDevice.value) {
     await shareAssets([asset])
     return
@@ -194,6 +243,7 @@ async function downloadAsset(asset) {
 
 async function downloadSelectedAssets() {
   if (selectedCount.value === 0) return
+  isActionMenuOpen.value = false
   const selectedAssets = assets.value.filter((asset) => selectedAssetIds.value.has(asset.id))
 
   if (isMobileDevice.value) {
@@ -247,6 +297,7 @@ async function shareAssets(targetAssets) {
 }
 
 async function deleteAsset(asset) {
+  isDetailMenuOpen.value = false
   if (!confirm(`${asset.filename} 파일을 삭제할까요?`)) return
   const response = await fetch(`/api/media/${asset.id}`, { method: 'DELETE' })
   if (!response.ok) throw new Error('삭제하지 못했어요.')
@@ -257,6 +308,7 @@ async function deleteAsset(asset) {
 async function deleteSelectedAssets() {
   if (selectedCount.value === 0) return
   if (!confirm(`선택한 ${selectedCount.value}개 파일을 삭제할까요?`)) return
+  isActionMenuOpen.value = false
   const response = await fetch('/api/media/delete', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -273,10 +325,7 @@ function mediaViewUrl(asset) {
 }
 
 function mediaThumbnailUrl(asset) {
-  if (asset.mediaType === 'VIDEO') {
-    return `/api/media/${asset.id}/thumbnail`
-  }
-  return mediaViewUrl(asset)
+  return `/api/media/${asset.id}/thumbnail`
 }
 
 function assetDate(asset) {
@@ -323,20 +372,11 @@ function formatBytes(bytes) {
       <div class="hero-grid">
         <div class="hero-copy">
           <h1>{{ appConfig.appTitle }}</h1>
-          <div class="hero-actions">
-            <label class="primary-action">
-              <input type="file" multiple accept="image/*,video/*" @change="onFileChange" />
-              <span aria-hidden="true">+</span>
-              사진과 동영상 선택
-            </label>
-            <button class="secondary-action" type="button" :disabled="!selectedFiles.length || isUploading" @click="uploadSelectedFiles">
-              <span aria-hidden="true">↑</span>
-              {{ uploadButtonLabel }}
-            </button>
-          </div>
         </div>
       </div>
     </section>
+
+    <input ref="fileInput" class="hidden-file-input" type="file" multiple accept="image/*,video/*,.heic,.heif,.heics,.heifs,.mov,.m4v,image/heic,image/heif,video/quicktime" @change="onFileChange" />
 
     <section v-if="selectedFiles.length || uploadMessage" class="upload-summary" aria-live="polite">
       <div>
@@ -348,25 +388,9 @@ function formatBytes(bytes) {
     </section>
 
     <section class="content-section">
-      <div class="section-heading compact-heading">
-        <div class="section-actions">
-          <button class="ghost-button" type="button" @click="toggleSelectionMode">
-            <span aria-hidden="true">✓</span>
-            {{ isSelectionMode ? '선택 취소' : '선택' }}
-          </button>
-          <button class="ghost-button" type="button" @click="loadAssets">
-            <span aria-hidden="true">↻</span>
-            새로고침
-          </button>
-        </div>
-      </div>
-
-      <div v-if="isSelectionMode" class="selection-toolbar">
+      <div v-if="isSelectionMode" class="selection-chip">
         <strong>{{ selectedCount }}개 선택됨</strong>
-        <div>
-          <button type="button" :disabled="selectedCount === 0" @click="downloadSelectedAssets">{{ downloadActionLabel }}</button>
-          <button type="button" :disabled="selectedCount === 0" class="danger-button" @click="deleteSelectedAssets">삭제</button>
-        </div>
+        <button type="button" @click="toggleSelectionMode">취소</button>
       </div>
 
       <div v-if="assets.length === 0" class="empty-state">
@@ -405,13 +429,44 @@ function formatBytes(bytes) {
       </div>
     </section>
 
+    <div class="floating-actions" :class="{ 'is-open': isActionMenuOpen }">
+      <div v-if="isActionMenuOpen" class="floating-menu" role="menu">
+        <button type="button" role="menuitem" @click="openFilePicker">사진/동영상 선택</button>
+        <button type="button" role="menuitem" :disabled="!selectedFiles.length || isUploading" @click="uploadSelectedFiles">
+          {{ uploadButtonLabel }}
+        </button>
+        <button type="button" role="menuitem" @click="toggleSelectionMode">
+          {{ isSelectionMode ? '선택 취소' : '선택 모드' }}
+        </button>
+        <button type="button" role="menuitem" @click="refreshAssets">새로고침</button>
+        <button v-if="isSelectionMode" type="button" role="menuitem" :disabled="selectedCount === 0" @click="downloadSelectedAssets">
+          선택 {{ downloadActionLabel }}
+        </button>
+        <button v-if="isSelectionMode" type="button" role="menuitem" :disabled="selectedCount === 0" class="danger-button" @click="deleteSelectedAssets">
+          선택 삭제
+        </button>
+      </div>
+      <button
+        class="floating-trigger"
+        type="button"
+        :aria-expanded="isActionMenuOpen"
+        aria-label="앨범 조작 메뉴"
+        @click="isActionMenuOpen = !isActionMenuOpen"
+      >
+        <span></span>
+        <span></span>
+        <span></span>
+        <span></span>
+      </button>
+    </div>
+
     <div v-if="activeAsset" class="detail-backdrop" @click.self="closeAsset">
       <article class="detail-panel" role="dialog" aria-modal="true" aria-labelledby="asset-detail-title">
         <button class="detail-close" type="button" aria-label="닫기" @click="closeAsset">×</button>
         <button class="detail-nav detail-prev" type="button" :disabled="!hasPreviousAsset" aria-label="이전 사진" @click="showPreviousAsset">‹</button>
         <button class="detail-nav detail-next" type="button" :disabled="!hasNextAsset" aria-label="다음 사진" @click="showNextAsset">›</button>
 
-        <div class="detail-preview">
+        <div class="detail-preview" @touchstart.passive="onDetailTouchStart" @touchend.passive="onDetailTouchEnd">
           <video
             v-if="activeAsset.mediaType === 'VIDEO'"
             :src="mediaViewUrl(activeAsset)"
@@ -421,13 +476,18 @@ function formatBytes(bytes) {
           ></video>
           <img v-else :src="mediaViewUrl(activeAsset)" :alt="activeAsset.filename" />
         </div>
-        <div class="detail-info">
+        <div class="detail-quick-actions">
+          <div v-if="isDetailMenuOpen" class="detail-menu" role="menu">
+            <button type="button" role="menuitem" @click="downloadAsset(activeAsset)">{{ downloadActionLabel }}</button>
+            <button type="button" role="menuitem" @click="toggleDetailInfo">상세</button>
+            <button type="button" role="menuitem" class="danger-button" @click="deleteAsset(activeAsset)">삭제</button>
+          </div>
+          <button class="detail-menu-trigger" type="button" :aria-expanded="isDetailMenuOpen" aria-label="상세 조작 메뉴" @click="isDetailMenuOpen = !isDetailMenuOpen">i</button>
+        </div>
+
+        <div v-if="isDetailInfoOpen" class="detail-info">
           <p class="eyebrow">{{ activeAsset.mediaType === 'VIDEO' ? 'Video' : 'Photo' }}</p>
           <h2 id="asset-detail-title">{{ activeAsset.filename }}</h2>
-          <div class="detail-actions">
-            <button type="button" @click="downloadAsset(activeAsset)">{{ downloadActionLabel }}</button>
-            <button type="button" class="danger-button" @click="deleteAsset(activeAsset)">삭제</button>
-          </div>
           <dl>
             <div>
               <dt>기록일</dt>

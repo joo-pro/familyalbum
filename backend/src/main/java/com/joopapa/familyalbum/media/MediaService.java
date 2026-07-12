@@ -67,9 +67,9 @@ public class MediaService {
 
     @Transactional
     public MediaDtos.MediaAssetResponse uploadFile(MultipartFile file, Instant capturedAt) {
-        String contentType = normalizeContentType(file.getContentType());
-        MediaType mediaType = detectMediaType(contentType);
         String filename = cleanFilename(file.getOriginalFilename());
+        String contentType = normalizeContentType(file.getContentType(), filename);
+        MediaType mediaType = detectMediaType(contentType);
 
         Path uploadFile = null;
         MediaAsset asset = null;
@@ -104,7 +104,7 @@ public class MediaService {
                     RequestBody.fromFile(uploadFile)
             );
             verifyUploadedObject(asset);
-            generateThumbnailIfVideo(asset, uploadFile);
+            generateWebAssets(asset, uploadFile);
             asset.markUploaded();
             return MediaDtos.MediaAssetResponse.from(asset);
         } catch (IOException exception) {
@@ -124,12 +124,13 @@ public class MediaService {
 
     @Transactional
     public MediaDtos.CreateUploadUrlResponse createUploadUrl(MediaDtos.CreateUploadUrlRequest request) {
-        MediaType mediaType = detectMediaType(request.contentType());
+        String contentType = normalizeContentType(request.contentType(), request.filename());
+        MediaType mediaType = detectMediaType(contentType);
         String objectKey = createOriginalObjectKey(request.filename());
         MediaAsset asset = mediaAssetRepository.save(new MediaAsset(
                 objectKey,
                 cleanFilename(request.filename()),
-                request.contentType(),
+                contentType,
                 mediaType,
                 request.byteSize(),
                 request.capturedAt()
@@ -138,7 +139,7 @@ public class MediaService {
         PutObjectRequest putObjectRequest = PutObjectRequest.builder()
                 .bucket(storageProperties.bucket())
                 .key(objectKey)
-                .contentType(request.contentType())
+                .contentType(contentType)
                 .build();
         PutObjectPresignRequest presignRequest = PutObjectPresignRequest.builder()
                 .signatureDuration(storageProperties.uploadUrlTtl())
@@ -159,7 +160,7 @@ public class MediaService {
         MediaAsset asset = mediaAssetRepository.findById(assetId)
                 .orElseThrow(() -> new IllegalArgumentException("Media asset not found"));
         verifyUploadedObject(asset);
-        generateThumbnailFromStorageIfVideo(asset);
+        generateWebAssetsFromStorage(asset);
         asset.markUploaded();
         return MediaDtos.MediaAssetResponse.from(asset);
     }
@@ -192,25 +193,39 @@ public class MediaService {
     @Transactional(readOnly = true)
     public String createViewUrl(UUID assetId) {
         MediaAsset asset = getAsset(assetId);
+        if (asset.hasPreview()) {
+            return createInlineUrl(asset.getPreviewObjectKey(), asset.getPreviewContentType(), previewFilename(asset));
+        }
         return createInlineUrl(asset.getOriginalObjectKey(), asset.getContentType(), asset.getOriginalFilename());
     }
 
+    public record ThumbnailContent(String objectKey, String contentType, String etag, boolean settled) {
+    }
+
     @Transactional
-    public String createThumbnailViewUrl(UUID assetId) {
+    public ThumbnailContent resolveThumbnailContent(UUID assetId) {
         MediaAsset asset = getAsset(assetId);
-        generateThumbnailFromStorageIfVideo(asset);
-        if (!asset.hasThumbnail()) {
-            return createViewUrl(assetId);
+        generateWebAssetsFromStorage(asset);
+        boolean settled = !needsWebAssetGeneration(asset);
+        if (asset.hasThumbnail()) {
+            return new ThumbnailContent(asset.getThumbnailObjectKey(), "image/jpeg", asset.getThumbnailObjectKey(), settled);
         }
-        return createInlineUrl(asset.getThumbnailObjectKey(), "image/jpeg", stemOf(asset.getOriginalFilename()) + ".jpg");
+        if (asset.hasPreview() && asset.getPreviewContentType() != null && asset.getPreviewContentType().startsWith("image/")) {
+            return new ThumbnailContent(asset.getPreviewObjectKey(), asset.getPreviewContentType(), asset.getPreviewObjectKey(), settled);
+        }
+        return new ThumbnailContent(asset.getOriginalObjectKey(), asset.getContentType(), asset.getOriginalObjectKey(), settled);
     }
 
     @Transactional(readOnly = true)
     public void writeOriginalFile(UUID assetId, OutputStream outputStream) throws IOException {
         MediaAsset asset = getAsset(assetId);
+        writeObject(asset.getOriginalObjectKey(), outputStream);
+    }
+
+    public void writeObject(String objectKey, OutputStream outputStream) throws IOException {
         try (ResponseInputStream<GetObjectResponse> objectStream = s3Client.getObject(GetObjectRequest.builder()
                 .bucket(storageProperties.bucket())
-                .key(asset.getOriginalObjectKey())
+                .key(objectKey)
                 .build())) {
             objectStream.transferTo(outputStream);
         }
@@ -284,6 +299,9 @@ public class MediaService {
         if (asset.hasThumbnail()) {
             deleteObject(asset.getThumbnailObjectKey());
         }
+        if (asset.hasPreview()) {
+            deleteObject(asset.getPreviewObjectKey());
+        }
     }
 
     private void deleteObject(String objectKey) {
@@ -293,8 +311,151 @@ public class MediaService {
                 .build());
     }
 
-    private void generateThumbnailFromStorageIfVideo(MediaAsset asset) {
-        if (asset.getMediaType() != MediaType.VIDEO || asset.hasThumbnail()) {
+    private boolean needsWebAssetGeneration(MediaAsset asset) {
+        if (asset.getMediaType() == MediaType.VIDEO) {
+            return !asset.hasPreview() || !asset.hasThumbnail();
+        }
+        return isHeifImage(asset) && (!asset.hasPreview() || !asset.hasThumbnail());
+    }
+
+    private void generateWebAssets(MediaAsset asset, Path originalFile) {
+        if (originalFile == null) {
+            return;
+        }
+        if (asset.getMediaType() == MediaType.VIDEO) {
+            generateThumbnailIfVideo(asset, originalFile);
+            generateVideoPreviewIfNeeded(asset, originalFile);
+            return;
+        }
+        if (isHeifImage(asset)) {
+            generateImagePreviewIfNeeded(asset, originalFile);
+            generateImageThumbnailIfNeeded(asset, originalFile);
+        }
+    }
+
+    private void generateImagePreviewIfNeeded(MediaAsset asset, Path originalFile) {
+        if (asset.hasPreview()) {
+            return;
+        }
+        Path previewFile = null;
+        try {
+            previewFile = Files.createTempFile("familyalbum-image-preview-", ".jpg");
+            int exitCode = runFfmpeg(List.of(
+                    "ffmpeg",
+                    "-y",
+                    "-i", originalFile.toString(),
+                    "-frames:v", "1",
+                    "-vf", "scale=2048:2048:force_original_aspect_ratio=decrease",
+                    "-q:v", "3",
+                    previewFile.toString()
+            ));
+            if (exitCode != 0 || Files.size(previewFile) == 0) {
+                log.warn("HEIF image preview generation failed for asset {} with exit code {}", asset.getId(), exitCode);
+                return;
+            }
+            String previewObjectKey = createPreviewObjectKey(".jpg");
+            uploadGeneratedObject(previewObjectKey, "image/jpeg", previewFile);
+            asset.setPreview(previewObjectKey, "image/jpeg");
+        } catch (IOException exception) {
+            log.warn("Failed to generate HEIF image preview for {}", asset.getId(), exception);
+        } finally {
+            deleteTempFile(previewFile);
+        }
+    }
+
+    private void generateImageThumbnailIfNeeded(MediaAsset asset, Path originalFile) {
+        if (asset.hasThumbnail()) {
+            return;
+        }
+        Path thumbnailFile = null;
+        try {
+            thumbnailFile = Files.createTempFile("familyalbum-image-thumbnail-", ".jpg");
+            int exitCode = runFfmpeg(List.of(
+                    "ffmpeg",
+                    "-y",
+                    "-i", originalFile.toString(),
+                    "-frames:v", "1",
+                    "-vf", "scale=640:640:force_original_aspect_ratio=decrease",
+                    "-q:v", "4",
+                    thumbnailFile.toString()
+            ));
+            if (exitCode != 0 || Files.size(thumbnailFile) == 0) {
+                log.warn("HEIF image thumbnail generation failed for asset {} with exit code {}", asset.getId(), exitCode);
+                return;
+            }
+            String thumbnailObjectKey = createThumbnailObjectKey();
+            uploadGeneratedObject(thumbnailObjectKey, "image/jpeg", thumbnailFile);
+            asset.setThumbnailObjectKey(thumbnailObjectKey);
+        } catch (IOException exception) {
+            log.warn("Failed to generate HEIF image thumbnail for {}", asset.getId(), exception);
+        } finally {
+            deleteTempFile(thumbnailFile);
+        }
+    }
+
+    private void generateVideoPreviewIfNeeded(MediaAsset asset, Path originalFile) {
+        if (asset.hasPreview()) {
+            return;
+        }
+        Path previewFile = null;
+        try {
+            previewFile = Files.createTempFile("familyalbum-video-preview-", ".mp4");
+            int exitCode = runFfmpeg(List.of(
+                    "ffmpeg",
+                    "-y",
+                    "-i", originalFile.toString(),
+                    "-map", "0:v:0",
+                    "-map", "0:a?",
+                    "-vf", "scale=1920:1080:force_original_aspect_ratio=decrease",
+                    "-c:v", "libx264",
+                    "-preset", "veryfast",
+                    "-crf", "23",
+                    "-pix_fmt", "yuv420p",
+                    "-c:a", "aac",
+                    "-b:a", "128k",
+                    "-movflags", "+faststart",
+                    previewFile.toString()
+            ));
+            if (exitCode != 0 || Files.size(previewFile) == 0) {
+                log.warn("Video preview generation failed for asset {} with exit code {}", asset.getId(), exitCode);
+                return;
+            }
+            String previewObjectKey = createPreviewObjectKey(".mp4");
+            uploadGeneratedObject(previewObjectKey, "video/mp4", previewFile);
+            asset.setPreview(previewObjectKey, "video/mp4");
+        } catch (IOException exception) {
+            log.warn("Failed to generate video preview for {}", asset.getId(), exception);
+        } finally {
+            deleteTempFile(previewFile);
+        }
+    }
+
+    private void uploadGeneratedObject(String objectKey, String contentType, Path file) {
+        s3Client.putObject(
+                PutObjectRequest.builder()
+                        .bucket(storageProperties.bucket())
+                        .key(objectKey)
+                        .contentType(contentType)
+                        .build(),
+                RequestBody.fromFile(file)
+        );
+    }
+
+    private int runFfmpeg(List<String> command) throws IOException {
+        try {
+            Process process = new ProcessBuilder(command)
+                    .redirectOutput(ProcessBuilder.Redirect.DISCARD)
+                    .redirectError(ProcessBuilder.Redirect.DISCARD)
+                    .start();
+            return process.waitFor();
+        } catch (InterruptedException exception) {
+            Thread.currentThread().interrupt();
+            return -1;
+        }
+    }
+
+    private void generateWebAssetsFromStorage(MediaAsset asset) {
+        if (!needsWebAssetGeneration(asset)) {
             return;
         }
         Path originalFile = null;
@@ -306,9 +467,9 @@ public class MediaService {
                     .build())) {
                 Files.copy(objectStream, originalFile, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
             }
-            generateThumbnailIfVideo(asset, originalFile);
+            generateWebAssets(asset, originalFile);
         } catch (IOException exception) {
-            log.warn("Failed to prepare video thumbnail source for {}", asset.getId(), exception);
+            log.warn("Failed to prepare web media source for {}", asset.getId(), exception);
         } finally {
             deleteTempFile(originalFile);
         }
@@ -321,7 +482,7 @@ public class MediaService {
         Path thumbnailFile = null;
         try {
             thumbnailFile = Files.createTempFile("familyalbum-thumbnail-", ".jpg");
-            Process process = new ProcessBuilder(
+            int exitCode = runFfmpeg(List.of(
                     "ffmpeg",
                     "-y",
                     "-ss", "00:00:01",
@@ -330,27 +491,16 @@ public class MediaService {
                     "-vf", "scale=640:-2",
                     "-q:v", "4",
                     thumbnailFile.toString()
-            ).redirectErrorStream(true).start();
-            int exitCode = process.waitFor();
+            ));
             if (exitCode != 0 || Files.size(thumbnailFile) == 0) {
                 log.warn("ffmpeg thumbnail generation failed for asset {} with exit code {}", asset.getId(), exitCode);
                 return;
             }
             String thumbnailObjectKey = createThumbnailObjectKey();
-            s3Client.putObject(
-                    PutObjectRequest.builder()
-                            .bucket(storageProperties.bucket())
-                            .key(thumbnailObjectKey)
-                            .contentType("image/jpeg")
-                            .build(),
-                    RequestBody.fromFile(thumbnailFile)
-            );
+            uploadGeneratedObject(thumbnailObjectKey, "image/jpeg", thumbnailFile);
             asset.setThumbnailObjectKey(thumbnailObjectKey);
         } catch (IOException exception) {
             log.warn("Failed to generate video thumbnail for {}", asset.getId(), exception);
-        } catch (InterruptedException exception) {
-            Thread.currentThread().interrupt();
-            log.warn("Video thumbnail generation was interrupted for {}", asset.getId(), exception);
         } finally {
             deleteTempFile(thumbnailFile);
         }
@@ -405,6 +555,14 @@ public class MediaService {
         );
     }
 
+    private static String createPreviewObjectKey(String extension) {
+        return "previews/%s/%s%s".formatted(
+                Instant.now().toString().substring(0, 10).replace("-", "/"),
+                UUID.randomUUID(),
+                extension
+        );
+    }
+
     private static MediaType detectMediaType(String contentType) {
         String lower = contentType.toLowerCase(Locale.ROOT);
         if (lower.startsWith("image/")) {
@@ -416,11 +574,23 @@ public class MediaService {
         throw new IllegalArgumentException("Only image and video files are supported");
     }
 
-    private static String normalizeContentType(String contentType) {
-        if (contentType == null || contentType.isBlank()) {
-            return "application/octet-stream";
+    private static String normalizeContentType(String contentType, String filename) {
+        String normalized = contentType == null ? "" : contentType.toLowerCase(Locale.ROOT).trim();
+        if (!normalized.isBlank() && !"application/octet-stream".equals(normalized)) {
+            return normalized;
         }
-        return contentType;
+        return switch (extensionOf(filename).toLowerCase(Locale.ROOT)) {
+            case ".heic", ".heics" -> "image/heic";
+            case ".heif", ".heifs" -> "image/heif";
+            case ".jpg", ".jpeg" -> "image/jpeg";
+            case ".png" -> "image/png";
+            case ".gif" -> "image/gif";
+            case ".webp" -> "image/webp";
+            case ".mov" -> "video/quicktime";
+            case ".m4v" -> "video/x-m4v";
+            case ".mp4" -> "video/mp4";
+            default -> "application/octet-stream";
+        };
     }
 
     private static String cleanFilename(String filename) {
@@ -448,6 +618,25 @@ public class MediaService {
         return cleaned.substring(0, dotIndex);
     }
 
+    private static boolean isHeifImage(MediaAsset asset) {
+        String contentType = asset.getContentType().toLowerCase(Locale.ROOT);
+        String extension = extensionOf(asset.getOriginalFilename());
+        return contentType.equals("image/heic")
+                || contentType.equals("image/heif")
+                || contentType.equals("image/heic-sequence")
+                || contentType.equals("image/heif-sequence")
+                || extension.equals(".heic")
+                || extension.equals(".heif")
+                || extension.equals(".heics")
+                || extension.equals(".heifs");
+    }
+
+    private static String previewFilename(MediaAsset asset) {
+        if ("video/mp4".equals(asset.getPreviewContentType())) {
+            return stemOf(asset.getOriginalFilename()) + ".mp4";
+        }
+        return stemOf(asset.getOriginalFilename()) + ".jpg";
+    }
     private static String extensionOf(String filename) {
         String cleaned = cleanFilename(filename);
         int dotIndex = cleaned.lastIndexOf('.');
