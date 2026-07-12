@@ -22,12 +22,18 @@ public interface MediaAssetRepository extends JpaRepository<MediaAsset, UUID> {
     @Query("""
             select asset
             from MediaAsset asset
-            where :cursorDate is null
-                or coalesce(asset.capturedAt, asset.createdAt) < :cursorDate
+            order by coalesce(asset.capturedAt, asset.createdAt) desc, asset.createdAt desc
+            """)
+    List<MediaAsset> findTimelinePage(Pageable pageable);
+
+    @Query("""
+            select asset
+            from MediaAsset asset
+            where coalesce(asset.capturedAt, asset.createdAt) < :cursorDate
                 or (coalesce(asset.capturedAt, asset.createdAt) = :cursorDate and asset.createdAt < :cursorCreatedAt)
             order by coalesce(asset.capturedAt, asset.createdAt) desc, asset.createdAt desc
             """)
-    List<MediaAsset> findTimelinePage(
+    List<MediaAsset> findTimelinePageAfter(
             @Param("cursorDate") Instant cursorDate,
             @Param("cursorCreatedAt") Instant cursorCreatedAt,
             Pageable pageable

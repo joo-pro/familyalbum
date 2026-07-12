@@ -82,11 +82,14 @@ public class MediaService {
     public MediaDtos.MediaPageResponse listAssetsPage(String cursor, int limit) {
         int pageSize = Math.clamp(limit, 1, 80);
         TimelineCursor timelineCursor = decodeCursor(cursor);
-        List<MediaAsset> page = mediaAssetRepository.findTimelinePage(
-                timelineCursor.date(),
-                timelineCursor.createdAt(),
-                PageRequest.of(0, pageSize + 1)
-        );
+        PageRequest pageRequest = PageRequest.of(0, pageSize + 1);
+        List<MediaAsset> page = timelineCursor.date() == null
+                ? mediaAssetRepository.findTimelinePage(pageRequest)
+                : mediaAssetRepository.findTimelinePageAfter(
+                        timelineCursor.date(),
+                        timelineCursor.createdAt(),
+                        pageRequest
+                );
         boolean hasMore = page.size() > pageSize;
         List<MediaAsset> visiblePage = hasMore ? page.subList(0, pageSize) : page;
         String nextCursor = hasMore && !visiblePage.isEmpty()

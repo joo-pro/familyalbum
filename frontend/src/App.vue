@@ -21,6 +21,7 @@ const fileInput = ref(null)
 const pageSentinel = ref(null)
 const nextCursor = ref(null)
 const isLoadingAssets = ref(false)
+const assetLoadMessage = ref('')
 const hasMoreAssets = ref(true)
 const visibleThumbnailIds = ref(new Set())
 
@@ -88,6 +89,7 @@ async function loadAssets() {
   assets.value = []
   nextCursor.value = null
   hasMoreAssets.value = true
+  assetLoadMessage.value = ''
   visibleThumbnailIds.value = new Set()
   thumbnailObserver?.disconnect()
   thumbnailObserver = null
@@ -101,17 +103,22 @@ async function loadNextAssets() {
     const params = new URLSearchParams({ limit: '48' })
     if (nextCursor.value) params.set('cursor', nextCursor.value)
     const response = await fetch(`/api/media?${params}`)
-    if (response.ok) {
-      const page = await response.json()
-      const items = Array.isArray(page) ? page : (page.items ?? [])
-      assets.value = nextCursor.value ? [...assets.value, ...items] : items
-      nextCursor.value = Array.isArray(page) ? null : (page.nextCursor ?? null)
-      hasMoreAssets.value = Array.isArray(page) ? false : Boolean(page.hasMore)
-      await nextTick()
-      setupLoadMoreObserver()
+    if (!response.ok) {
+      throw new Error(`MEDIA_LIST_${response.status}`)
     }
+
+    const page = await response.json()
+    const items = Array.isArray(page) ? page : (page.items ?? [])
+    assets.value = nextCursor.value ? [...assets.value, ...items] : items
+    nextCursor.value = Array.isArray(page) ? null : (page.nextCursor ?? null)
+    hasMoreAssets.value = Array.isArray(page) ? false : Boolean(page.hasMore)
+    assetLoadMessage.value = ''
+    await nextTick()
+    setupLoadMoreObserver()
   } catch {
     if (!nextCursor.value) assets.value = []
+    hasMoreAssets.value = false
+    assetLoadMessage.value = '사진과 동영상을 불러오지 못했어요. 잠시 후 새로고침해 주세요.'
   } finally {
     isLoadingAssets.value = false
   }
@@ -477,7 +484,19 @@ function formatBytes(bytes) {
         <button type="button" @click="toggleSelectionMode">취소</button>
       </div>
 
-      <div v-if="assets.length === 0" class="empty-state">
+      <div v-if="assetLoadMessage && assets.length === 0" class="empty-state">
+        <div class="empty-visual" aria-hidden="true">!</div>
+        <h3>기록을 불러오지 못했어요</h3>
+        <p>{{ assetLoadMessage }}</p>
+      </div>
+
+      <div v-else-if="isLoadingAssets && assets.length === 0" class="empty-state">
+        <div class="empty-visual" aria-hidden="true">...</div>
+        <h3>기록을 불러오는 중이에요</h3>
+        <p>잠시만 기다려 주세요.</p>
+      </div>
+
+      <div v-else-if="assets.length === 0" class="empty-state">
         <div class="empty-visual" aria-hidden="true">+</div>
         <h3>아직 올라온 기록이 없어요</h3>
         <p>첫 사진이나 동영상을 올리면 날짜별 타임라인으로 쌓입니다.</p>
