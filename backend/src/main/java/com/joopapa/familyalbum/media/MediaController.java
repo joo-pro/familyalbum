@@ -1,7 +1,11 @@
 package com.joopapa.familyalbum.media;
 
+import jakarta.servlet.http.HttpServletResponse;
 import jakarta.validation.Valid;
 import org.springframework.format.annotation.DateTimeFormat;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.MediaType;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -10,6 +14,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.multipart.MultipartFile;
+import org.springframework.web.servlet.mvc.method.annotation.StreamingResponseBody;
 import org.springframework.web.servlet.view.RedirectView;
 
 import java.time.Instant;
@@ -59,10 +64,27 @@ public class MediaController {
         return mediaService.createDownloadUrl(assetId);
     }
 
+    @PostMapping(value = "/media/download", produces = "application/zip")
+    StreamingResponseBody downloadMediaZip(@Valid @RequestBody MediaDtos.BatchMediaRequest request, HttpServletResponse response) {
+        response.setHeader(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"familyalbum-media.zip\"");
+        response.setContentType("application/zip");
+        return outputStream -> mediaService.writeDownloadZip(request.assetIds(), outputStream);
+    }
+
     @GetMapping("/media/{assetId}/view")
     RedirectView viewMedia(@PathVariable UUID assetId) {
         RedirectView redirectView = new RedirectView(mediaService.createViewUrl(assetId));
         redirectView.setExposeModelAttributes(false);
         return redirectView;
+    }
+
+    @DeleteMapping("/media/{assetId}")
+    MediaDtos.DeleteMediaResponse deleteMedia(@PathVariable UUID assetId) {
+        return mediaService.deleteAsset(assetId);
+    }
+
+    @PostMapping("/media/delete")
+    MediaDtos.DeleteMediaResponse deleteMediaBatch(@Valid @RequestBody MediaDtos.BatchMediaRequest request) {
+        return mediaService.deleteAssets(request.assetIds());
     }
 }

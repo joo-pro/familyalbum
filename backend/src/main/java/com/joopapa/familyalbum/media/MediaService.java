@@ -5,9 +5,12 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 import org.springframework.web.multipart.MultipartFile;
+import software.amazon.awssdk.core.ResponseInputStream;
 import software.amazon.awssdk.core.sync.RequestBody;
 import software.amazon.awssdk.services.s3.S3Client;
+import software.amazon.awssdk.services.s3.model.DeleteObjectRequest;
 import software.amazon.awssdk.services.s3.model.GetObjectRequest;
+import software.amazon.awssdk.services.s3.model.GetObjectResponse;
 import software.amazon.awssdk.services.s3.model.HeadObjectRequest;
 import software.amazon.awssdk.services.s3.model.NoSuchKeyException;
 import software.amazon.awssdk.services.s3.model.PutObjectRequest;
@@ -16,10 +19,16 @@ import software.amazon.awssdk.services.s3.presigner.model.GetObjectPresignReques
 import software.amazon.awssdk.services.s3.presigner.model.PutObjectPresignRequest;
 
 import java.io.IOException;
+import java.io.OutputStream;
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.Set;
 import java.util.UUID;
+import java.util.zip.ZipEntry;
+import java.util.zip.ZipOutputStream;
 
 @Service
 public class MediaService {
@@ -163,6 +172,73 @@ public class MediaService {
         return s3Presigner.presignGetObject(presignRequest).url().toString();
     }
 
+    @Transactional
+    public MediaDtos.DeleteMediaResponse deleteAsset(UUID assetId) {
+        MediaAsset asset = mediaAssetRepository.findById(assetId)
+                .orElseThrow(() -> new IllegalArgumentException("Media asset not found"));
+        deleteObject(asset);
+        mediaAssetRepository.delete(asset);
+        return new MediaDtos.DeleteMediaResponse(1);
+    }
+
+    @Transactional
+    public MediaDtos.DeleteMediaResponse deleteAssets(List<UUID> assetIds) {
+        List<MediaAsset> assets = findAssets(assetIds);
+        for (MediaAsset asset : assets) {
+            deleteObject(asset);
+        }
+        mediaAssetRepository.deleteAll(assets);
+        return new MediaDtos.DeleteMediaResponse(assets.size());
+    }
+
+    @Transactional(readOnly = true)
+    public void writeDownloadZip(List<UUID> assetIds, OutputStream outputStream) throws IOException {
+        List<MediaAsset> assets = findAssets(assetIds);
+        Set<String> usedNames = new HashSet<>();
+        try (ZipOutputStream zipOutputStream = new ZipOutputStream(outputStream)) {
+            for (MediaAsset asset : assets) {
+                ZipEntry zipEntry = new ZipEntry(uniqueZipName(asset, usedNames));
+                zipOutputStream.putNextEntry(zipEntry);
+                try (ResponseInputStream<GetObjectResponse> objectStream = s3Client.getObject(GetObjectRequest.builder()
+                        .bucket(storageProperties.bucket())
+                        .key(asset.getOriginalObjectKey())
+                        .build())) {
+                    objectStream.transferTo(zipOutputStream);
+                }
+                zipOutputStream.closeEntry();
+            }
+        }
+    }
+
+    private List<MediaAsset> findAssets(List<UUID> assetIds) {
+        if (assetIds == null || assetIds.isEmpty()) {
+            throw new IllegalArgumentException("At least one media asset is required");
+        }
+        List<MediaAsset> assets = new ArrayList<>(mediaAssetRepository.findAllById(assetIds));
+        if (assets.size() != Set.copyOf(assetIds).size()) {
+            throw new IllegalArgumentException("Some media assets were not found");
+        }
+        return assets;
+    }
+
+    private void deleteObject(MediaAsset asset) {
+        s3Client.deleteObject(DeleteObjectRequest.builder()
+                .bucket(storageProperties.bucket())
+                .key(asset.getOriginalObjectKey())
+                .build());
+    }
+
+    private static String uniqueZipName(MediaAsset asset, Set<String> usedNames) {
+        String filename = cleanFilename(asset.getOriginalFilename());
+        String candidate = filename;
+        int counter = 2;
+        while (!usedNames.add(candidate)) {
+            candidate = stemOf(filename) + "-" + counter + extensionOf(filename);
+            counter++;
+        }
+        return candidate;
+    }
+
     private void verifyUploadedObject(MediaAsset asset) {
         try {
             var response = s3Client.headObject(HeadObjectRequest.builder()
@@ -208,6 +284,15 @@ public class MediaService {
     private static String cleanFilename(String filename) {
         String cleaned = StringUtils.cleanPath(filename == null ? "" : filename).replace("\"", "");
         return cleaned.isBlank() ? "upload" : cleaned;
+    }
+
+    private static String stemOf(String filename) {
+        String cleaned = cleanFilename(filename);
+        int dotIndex = cleaned.lastIndexOf('.');
+        if (dotIndex <= 0) {
+            return cleaned;
+        }
+        return cleaned.substring(0, dotIndex);
     }
 
     private static String extensionOf(String filename) {

@@ -14,11 +14,15 @@ const selectedFiles = ref([])
 const isUploading = ref(false)
 const uploadMessage = ref('')
 const activeAsset = ref(null)
+const isSelectionMode = ref(false)
+const selectedAssetIds = ref(new Set())
 
 const uploadedCount = computed(() => assets.value.length)
 const photoCount = computed(() => assets.value.filter((asset) => asset.mediaType === 'IMAGE').length)
 const videoCount = computed(() => assets.value.filter((asset) => asset.mediaType === 'VIDEO').length)
 const totalSize = computed(() => selectedFiles.value.reduce((sum, file) => sum + file.size, 0))
+const selectedCount = computed(() => selectedAssetIds.value.size)
+const selectedAssetIdList = computed(() => Array.from(selectedAssetIds.value))
 const uploadButtonLabel = computed(() => {
   if (isUploading.value) return '업로드 중'
   if (selectedFiles.value.length > 0) return `${selectedFiles.value.length}개 업로드`
@@ -117,12 +121,96 @@ async function uploadSelectedFiles() {
   }
 }
 
+function handleAssetClick(asset) {
+  if (isSelectionMode.value) {
+    toggleAssetSelection(asset.id)
+    return
+  }
+  openAsset(asset)
+}
+
 function openAsset(asset) {
   activeAsset.value = asset
 }
 
 function closeAsset() {
   activeAsset.value = null
+}
+
+function toggleSelectionMode() {
+  isSelectionMode.value = !isSelectionMode.value
+  if (!isSelectionMode.value) {
+    clearSelection()
+  }
+}
+
+function isSelected(assetId) {
+  return selectedAssetIds.value.has(assetId)
+}
+
+function toggleAssetSelection(assetId) {
+  const next = new Set(selectedAssetIds.value)
+  if (next.has(assetId)) {
+    next.delete(assetId)
+  } else {
+    next.add(assetId)
+  }
+  selectedAssetIds.value = next
+  if (next.size > 0) {
+    isSelectionMode.value = true
+  }
+}
+
+function clearSelection() {
+  selectedAssetIds.value = new Set()
+}
+
+async function downloadAsset(asset) {
+  const response = await fetch(`/api/media/${asset.id}/download-url`, { method: 'POST' })
+  if (!response.ok) throw new Error('다운로드 링크를 만들지 못했어요.')
+  const payload = await response.json()
+  window.location.href = payload.downloadUrl
+}
+
+async function downloadSelectedAssets() {
+  if (selectedCount.value === 0) return
+  const response = await fetch('/api/media/download', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ assetIds: selectedAssetIdList.value }),
+  })
+  if (!response.ok) throw new Error('선택한 파일을 다운로드하지 못했어요.')
+  const blob = await response.blob()
+  const url = URL.createObjectURL(blob)
+  const link = document.createElement('a')
+  link.href = url
+  link.download = 'familyalbum-media.zip'
+  document.body.appendChild(link)
+  link.click()
+  link.remove()
+  URL.revokeObjectURL(url)
+}
+
+async function deleteAsset(asset) {
+  if (!confirm(`${asset.filename} 파일을 삭제할까요?`)) return
+  const response = await fetch(`/api/media/${asset.id}`, { method: 'DELETE' })
+  if (!response.ok) throw new Error('삭제하지 못했어요.')
+  closeAsset()
+  await loadAssets()
+}
+
+async function deleteSelectedAssets() {
+  if (selectedCount.value === 0) return
+  if (!confirm(`선택한 ${selectedCount.value}개 파일을 삭제할까요?`)) return
+  const response = await fetch('/api/media/delete', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ assetIds: selectedAssetIdList.value }),
+  })
+  if (!response.ok) throw new Error('선택한 파일을 삭제하지 못했어요.')
+  clearSelection()
+  isSelectionMode.value = false
+  await loadAssets()
 }
 
 function mediaViewUrl(asset) {
@@ -234,10 +322,24 @@ function formatBytes(bytes) {
           <p class="eyebrow">Timeline</p>
           <h2>날짜별 성장 기록</h2>
         </div>
-        <button class="ghost-button" type="button" @click="loadAssets">
-          <span aria-hidden="true">↻</span>
-          새로고침
-        </button>
+        <div class="section-actions">
+          <button class="ghost-button" type="button" @click="toggleSelectionMode">
+            <span aria-hidden="true">✓</span>
+            {{ isSelectionMode ? '선택 취소' : '선택' }}
+          </button>
+          <button class="ghost-button" type="button" @click="loadAssets">
+            <span aria-hidden="true">↻</span>
+            새로고침
+          </button>
+        </div>
+      </div>
+
+      <div v-if="isSelectionMode" class="selection-toolbar">
+        <strong>{{ selectedCount }}개 선택됨</strong>
+        <div>
+          <button type="button" :disabled="selectedCount === 0" @click="downloadSelectedAssets">다운로드</button>
+          <button type="button" :disabled="selectedCount === 0" class="danger-button" @click="deleteSelectedAssets">삭제</button>
+        </div>
       </div>
 
       <div v-if="assets.length === 0" class="empty-state">
@@ -258,9 +360,10 @@ function formatBytes(bytes) {
               v-for="asset in group.assets"
               :key="asset.id"
               class="asset-card"
+              :class="{ 'is-selected': isSelected(asset.id) }"
               type="button"
-              :aria-label="`${asset.filename} 자세히 보기`"
-              @click="openAsset(asset)"
+              :aria-label="`${asset.filename} ${isSelectionMode ? '선택하기' : '자세히 보기'}`"
+              @click="handleAssetClick(asset)"
             >
               <div class="asset-thumb">
                 <video
@@ -272,6 +375,9 @@ function formatBytes(bytes) {
                 ></video>
                 <img v-else :src="mediaViewUrl(asset)" :alt="asset.filename" loading="lazy" />
                 <span v-if="asset.mediaType === 'VIDEO'" class="video-badge" aria-hidden="true">▶</span>
+                <span v-if="isSelectionMode" class="select-badge" :class="{ 'is-on': isSelected(asset.id) }" aria-hidden="true">
+                  {{ isSelected(asset.id) ? '✓' : '' }}
+                </span>
               </div>
             </button>
           </div>
@@ -294,6 +400,10 @@ function formatBytes(bytes) {
         <div class="detail-info">
           <p class="eyebrow">{{ activeAsset.mediaType === 'VIDEO' ? 'Video' : 'Photo' }}</p>
           <h2 id="asset-detail-title">{{ activeAsset.filename }}</h2>
+          <div class="detail-actions">
+            <button type="button" @click="downloadAsset(activeAsset)">다운로드</button>
+            <button type="button" class="danger-button" @click="deleteAsset(activeAsset)">삭제</button>
+          </div>
           <dl>
             <div>
               <dt>기록일</dt>
