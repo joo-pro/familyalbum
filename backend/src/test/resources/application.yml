@@ -1,0 +1,25 @@
+spring:
+  autoconfigure:
+    exclude: org.springframework.boot.autoconfigure.security.servlet.UserDetailsServiceAutoConfiguration
+  datasource:
+    url: jdbc:h2:mem:family_album;MODE=PostgreSQL;DATABASE_TO_LOWER=TRUE
+    username: sa
+    password:
+  flyway:
+    enabled: false
+  jpa:
+    hibernate:
+      ddl-auto: create-drop
+    open-in-view: false
+
+app:
+  cors:
+    allowed-origins:
+      - http://localhost:5173
+  storage:
+    provider: test
+    region: ap-northeast-2
+    bucket: test-bucket
+    endpoint: https://s3.ap-northeast-2.amazonaws.com
+    upload-url-ttl: PT15M
+    download-url-ttl: PT10M

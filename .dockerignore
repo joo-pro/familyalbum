@@ -1,0 +1,7 @@
+.git
+.agents
+**/target
+**/node_modules
+**/dist
+**/.env
+**/.DS_Store

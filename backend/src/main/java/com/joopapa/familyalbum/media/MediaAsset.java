@@ -1,0 +1,105 @@
+package com.joopapa.familyalbum.media;
+
+import jakarta.persistence.Column;
+import jakarta.persistence.Entity;
+import jakarta.persistence.EnumType;
+import jakarta.persistence.Enumerated;
+import jakarta.persistence.GeneratedValue;
+import jakarta.persistence.Id;
+import jakarta.persistence.Table;
+
+import java.time.Instant;
+import java.util.UUID;
+
+@Entity
+@Table(name = "media_assets")
+public class MediaAsset {
+
+    @Id
+    @GeneratedValue
+    private UUID id;
+
+    @Column(nullable = false, unique = true, length = 1024)
+    private String originalObjectKey;
+
+    @Column(nullable = false, length = 512)
+    private String originalFilename;
+
+    @Column(nullable = false)
+    private String contentType;
+
+    @Enumerated(EnumType.STRING)
+    @Column(nullable = false)
+    private MediaType mediaType;
+
+    @Column(nullable = false)
+    private long byteSize;
+
+    @Enumerated(EnumType.STRING)
+    @Column(nullable = false)
+    private UploadStatus uploadStatus;
+
+    private Instant capturedAt;
+
+    @Column(nullable = false)
+    private Instant createdAt;
+
+    @Column(nullable = false)
+    private Instant updatedAt;
+
+    protected MediaAsset() {
+    }
+
+    public MediaAsset(String originalObjectKey, String originalFilename, String contentType, MediaType mediaType, long byteSize) {
+        Instant now = Instant.now();
+        this.originalObjectKey = originalObjectKey;
+        this.originalFilename = originalFilename;
+        this.contentType = contentType;
+        this.mediaType = mediaType;
+        this.byteSize = byteSize;
+        this.uploadStatus = UploadStatus.PENDING;
+        this.createdAt = now;
+        this.updatedAt = now;
+    }
+
+    public UUID getId() {
+        return id;
+    }
+
+    public String getOriginalObjectKey() {
+        return originalObjectKey;
+    }
+
+    public String getOriginalFilename() {
+        return originalFilename;
+    }
+
+    public String getContentType() {
+        return contentType;
+    }
+
+    public MediaType getMediaType() {
+        return mediaType;
+    }
+
+    public long getByteSize() {
+        return byteSize;
+    }
+
+    public UploadStatus getUploadStatus() {
+        return uploadStatus;
+    }
+
+    public Instant getCapturedAt() {
+        return capturedAt;
+    }
+
+    public Instant getCreatedAt() {
+        return createdAt;
+    }
+
+    public void markUploaded() {
+        this.uploadStatus = UploadStatus.UPLOADED;
+        this.updatedAt = Instant.now();
+    }
+}
