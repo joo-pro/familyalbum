@@ -31,3 +31,4 @@ app:
     endpoint: ${S3_ENDPOINT:https://s3.ap-northeast-2.amazonaws.com}
     upload-url-ttl: ${S3_UPLOAD_URL_TTL:PT15M}
     download-url-ttl: ${S3_DOWNLOAD_URL_TTL:PT10M}
+    inline-url-ttl: ${S3_INLINE_URL_TTL:PT144H}

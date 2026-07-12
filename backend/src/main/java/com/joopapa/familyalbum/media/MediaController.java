@@ -3,7 +3,6 @@ package com.joopapa.familyalbum.media;
 import jakarta.servlet.http.HttpServletResponse;
 import jakarta.validation.Valid;
 import org.springframework.format.annotation.DateTimeFormat;
-import org.springframework.http.CacheControl;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.DeleteMapping;
@@ -11,17 +10,16 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
-import org.springframework.web.context.request.WebRequest;
 import org.springframework.web.multipart.MultipartFile;
 import org.springframework.web.servlet.mvc.method.annotation.StreamingResponseBody;
 import org.springframework.web.servlet.view.RedirectView;
 
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
-import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
@@ -92,23 +90,24 @@ public class MediaController {
     }
 
     @GetMapping("/media/{assetId}/thumbnail")
-    ResponseEntity<StreamingResponseBody> viewThumbnail(@PathVariable UUID assetId, WebRequest webRequest) {
-        MediaService.ThumbnailContent content = mediaService.resolveThumbnailContent(assetId);
-        String etag = "\"" + content.etag() + "\"";
-        if (webRequest.checkNotModified(etag)) {
-            return null;
+    ResponseEntity<StreamingResponseBody> viewThumbnail(
+            @PathVariable UUID assetId,
+            @RequestHeader(value = HttpHeaders.IF_NONE_MATCH, required = false) String ifNoneMatch
+    ) {
+        MediaService.CachedMediaObject thumbnail = mediaService.getThumbnailObject(assetId);
+        HttpHeaders headers = cacheHeaders(thumbnail);
+        if (etagMatches(ifNoneMatch, thumbnail.eTag())) {
+            return ResponseEntity.status(304).headers(headers).build();
         }
-
-        CacheControl cacheControl = content.settled()
-                ? CacheControl.maxAge(Duration.ofDays(365)).cachePublic().immutable()
-                : CacheControl.maxAge(Duration.ofSeconds(60)).cachePublic();
-
-        StreamingResponseBody body = outputStream -> mediaService.writeObject(content.objectKey(), outputStream);
         return ResponseEntity.ok()
-                .eTag(etag)
-                .cacheControl(cacheControl)
-                .contentType(org.springframework.http.MediaType.parseMediaType(content.contentType()))
-                .body(body);
+                .headers(headers)
+                .body(outputStream -> {
+                    if (thumbnail.hasInlineContent()) {
+                        outputStream.write(thumbnail.inlineContent());
+                        return;
+                    }
+                    mediaService.writeObject(thumbnail.objectKey(), outputStream);
+                });
     }
 
     @DeleteMapping("/media/{assetId}")
@@ -119,6 +118,28 @@ public class MediaController {
     @PostMapping("/media/delete")
     MediaDtos.DeleteMediaResponse deleteMediaBatch(@Valid @RequestBody MediaDtos.BatchMediaRequest request) {
         return mediaService.deleteAssets(request.assetIds());
+    }
+
+    private static HttpHeaders cacheHeaders(MediaService.CachedMediaObject mediaObject) {
+        HttpHeaders headers = new HttpHeaders();
+        headers.set(HttpHeaders.CONTENT_TYPE, mediaObject.contentType());
+        headers.set(HttpHeaders.CONTENT_DISPOSITION, inlineDisposition(mediaObject.filename()));
+        headers.set(HttpHeaders.CACHE_CONTROL, "private, max-age=" + mediaObject.browserCacheTtl().toSeconds() + ", immutable");
+        headers.set(HttpHeaders.ETAG, mediaObject.eTag());
+        headers.setLastModified(mediaObject.lastModified());
+        return headers;
+    }
+
+    private static boolean etagMatches(String ifNoneMatch, String eTag) {
+        return ifNoneMatch != null && ifNoneMatch.lines()
+                .flatMap(line -> List.of(line.split(",")).stream())
+                .map(String::trim)
+                .anyMatch(candidate -> candidate.equals(eTag) || candidate.equals("*"));
+    }
+
+    private static String inlineDisposition(String filename) {
+        String encoded = URLEncoder.encode(filename, StandardCharsets.UTF_8).replace("+", "%20");
+        return "inline; filename=\"media\"; filename*=UTF-8''" + encoded;
     }
 
     private static String contentDisposition(String filename) {

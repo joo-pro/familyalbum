@@ -3,8 +3,11 @@ package com.joopapa.familyalbum.media;
 import com.joopapa.familyalbum.storage.StorageProperties;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.springframework.util.StringUtils;
 import org.springframework.web.multipart.MultipartFile;
 import software.amazon.awssdk.core.ResponseInputStream;
@@ -22,11 +25,13 @@ import software.amazon.awssdk.services.s3.presigner.model.PutObjectPresignReques
 
 import java.io.IOException;
 import java.io.OutputStream;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.security.DigestInputStream;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.HashSet;
@@ -34,28 +39,35 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.Executor;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipOutputStream;
 
 @Service
 public class MediaService {
     private static final Logger log = LoggerFactory.getLogger(MediaService.class);
+    private static final Duration UNSETTLED_INLINE_URL_TTL = Duration.ofSeconds(60);
 
     private final MediaAssetRepository mediaAssetRepository;
     private final S3Client s3Client;
     private final S3Presigner s3Presigner;
     private final StorageProperties storageProperties;
+    private final Executor mediaProcessingExecutor;
+    private final Set<UUID> queuedProcessingAssetIds = ConcurrentHashMap.newKeySet();
 
     public MediaService(
             MediaAssetRepository mediaAssetRepository,
             S3Client s3Client,
             S3Presigner s3Presigner,
-            StorageProperties storageProperties
+            StorageProperties storageProperties,
+            @Qualifier("mediaProcessingExecutor") Executor mediaProcessingExecutor
     ) {
         this.mediaAssetRepository = mediaAssetRepository;
         this.s3Client = s3Client;
         this.s3Presigner = s3Presigner;
         this.storageProperties = storageProperties;
+        this.mediaProcessingExecutor = mediaProcessingExecutor;
     }
 
     @Transactional(readOnly = true)
@@ -104,8 +116,8 @@ public class MediaService {
                     RequestBody.fromFile(uploadFile)
             );
             verifyUploadedObject(asset);
-            generateWebAssets(asset, uploadFile);
             asset.markUploaded();
+            enqueueWebAssetGeneration(asset.getId());
             return MediaDtos.MediaAssetResponse.from(asset);
         } catch (IOException exception) {
             if (asset != null) {
@@ -160,8 +172,8 @@ public class MediaService {
         MediaAsset asset = mediaAssetRepository.findById(assetId)
                 .orElseThrow(() -> new IllegalArgumentException("Media asset not found"));
         verifyUploadedObject(asset);
-        generateWebAssetsFromStorage(asset);
         asset.markUploaded();
+        enqueueWebAssetGeneration(asset.getId());
         return MediaDtos.MediaAssetResponse.from(asset);
     }
 
@@ -199,21 +211,72 @@ public class MediaService {
         return createInlineUrl(asset.getOriginalObjectKey(), asset.getContentType(), asset.getOriginalFilename());
     }
 
-    public record ThumbnailContent(String objectKey, String contentType, String etag, boolean settled) {
+    public record CachedMediaObject(
+            String objectKey,
+            String contentType,
+            String filename,
+            Duration browserCacheTtl,
+            Instant lastModified,
+            String eTag,
+            byte[] inlineContent
+    ) {
+        boolean hasInlineContent() {
+            return inlineContent != null && inlineContent.length > 0;
+        }
     }
 
     @Transactional
-    public ThumbnailContent resolveThumbnailContent(UUID assetId) {
+    public CachedMediaObject getThumbnailObject(UUID assetId) {
         MediaAsset asset = getAsset(assetId);
-        generateWebAssetsFromStorage(asset);
         boolean settled = !needsWebAssetGeneration(asset);
+        if (!settled) {
+            enqueueWebAssetGeneration(asset.getId());
+        }
+        Duration ttl = settled ? storageProperties.inlineUrlTtl() : UNSETTLED_INLINE_URL_TTL;
+
         if (asset.hasThumbnail()) {
-            return new ThumbnailContent(asset.getThumbnailObjectKey(), "image/jpeg", asset.getThumbnailObjectKey(), settled);
+            return cachedObject(asset.getThumbnailObjectKey(), "image/jpeg", stemOf(asset.getOriginalFilename()) + ".jpg", ttl, asset);
         }
         if (asset.hasPreview() && asset.getPreviewContentType() != null && asset.getPreviewContentType().startsWith("image/")) {
-            return new ThumbnailContent(asset.getPreviewObjectKey(), asset.getPreviewContentType(), asset.getPreviewObjectKey(), settled);
+            return cachedObject(asset.getPreviewObjectKey(), asset.getPreviewContentType(), previewFilename(asset), ttl, asset);
         }
-        return new ThumbnailContent(asset.getOriginalObjectKey(), asset.getContentType(), asset.getOriginalObjectKey(), settled);
+        if (asset.getMediaType() == MediaType.IMAGE && !isHeifImage(asset)) {
+            return cachedObject(asset.getOriginalObjectKey(), asset.getContentType(), asset.getOriginalFilename(), UNSETTLED_INLINE_URL_TTL, asset);
+        }
+        return placeholderObject(asset);
+    }
+
+    private CachedMediaObject cachedObject(String objectKey, String contentType, String filename, Duration ttl, MediaAsset asset) {
+        return new CachedMediaObject(
+                objectKey,
+                contentType,
+                filename,
+                ttl,
+                asset.getUpdatedAt(),
+                "W/\"" + asset.getId() + ":" + objectKey.hashCode() + ":" + asset.getUpdatedAt().toEpochMilli() + "\"",
+                null
+        );
+    }
+
+
+    private CachedMediaObject placeholderObject(MediaAsset asset) {
+        String label = asset.getMediaType() == MediaType.VIDEO ? "Video" : "Preview";
+        String svg = """
+                <svg xmlns=\"http://www.w3.org/2000/svg\" width=\"640\" height=\"640\" viewBox=\"0 0 640 640\">
+                  <rect width=\"640\" height=\"640\" fill=\"#e7f6ff\"/>
+                  <circle cx=\"320\" cy=\"292\" r=\"78\" fill=\"#8fcdf4\"/>
+                  <text x=\"320\" y=\"420\" text-anchor=\"middle\" font-family=\"Arial, sans-serif\" font-size=\"34\" font-weight=\"700\" fill=\"#2f78a8\">%s</text>
+                </svg>
+                """.formatted(label);
+        return new CachedMediaObject(
+                null,
+                "image/svg+xml;charset=UTF-8",
+                "thumbnail.svg",
+                UNSETTLED_INLINE_URL_TTL,
+                asset.getUpdatedAt(),
+                "W/\"" + asset.getId() + ":placeholder:" + asset.getUpdatedAt().toEpochMilli() + "\"",
+                svg.getBytes(StandardCharsets.UTF_8)
+        );
     }
 
     @Transactional(readOnly = true)
@@ -269,18 +332,29 @@ public class MediaService {
     }
 
     private String createInlineUrl(String objectKey, String contentType, String filename) {
-        GetObjectRequest getObjectRequest = GetObjectRequest.builder()
+        Duration ttl = storageProperties.inlineUrlTtl();
+        return createInlineUrl(objectKey, contentType, filename, ttl, privateCacheControl(ttl, true));
+    }
+
+    private String createInlineUrl(String objectKey, String contentType, String filename, Duration ttl, String responseCacheControl) {
+        GetObjectRequest.Builder requestBuilder = GetObjectRequest.builder()
                 .bucket(storageProperties.bucket())
                 .key(objectKey)
                 .responseContentType(contentType)
-                .responseContentDisposition("inline; filename=\"" + filename + "\"")
-                .build();
+                .responseContentDisposition("inline; filename=\"" + filename + "\"");
+        if (responseCacheControl != null) {
+            requestBuilder.responseCacheControl(responseCacheControl);
+        }
         GetObjectPresignRequest presignRequest = GetObjectPresignRequest.builder()
-                .signatureDuration(storageProperties.downloadUrlTtl())
-                .getObjectRequest(getObjectRequest)
+                .signatureDuration(ttl)
+                .getObjectRequest(requestBuilder.build())
                 .build();
 
         return s3Presigner.presignGetObject(presignRequest).url().toString();
+    }
+
+    private static String privateCacheControl(Duration ttl, boolean immutable) {
+        return "private, max-age=" + ttl.toSeconds() + (immutable ? ", immutable" : "");
     }
 
     private List<MediaAsset> findAssets(List<UUID> assetIds) {
@@ -292,6 +366,46 @@ public class MediaService {
             throw new IllegalArgumentException("Some media assets were not found");
         }
         return assets;
+    }
+
+
+    private void enqueueWebAssetGeneration(UUID assetId) {
+        if (!queuedProcessingAssetIds.add(assetId)) {
+            return;
+        }
+        Runnable task = () -> mediaProcessingExecutor.execute(() -> processQueuedWebAssetGeneration(assetId));
+        if (TransactionSynchronizationManager.isSynchronizationActive()) {
+            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                @Override
+                public void afterCommit() {
+                    task.run();
+                }
+
+                @Override
+                public void afterCompletion(int status) {
+                    if (status != STATUS_COMMITTED) {
+                        queuedProcessingAssetIds.remove(assetId);
+                    }
+                }
+            });
+            return;
+        }
+        task.run();
+    }
+
+    private void processQueuedWebAssetGeneration(UUID assetId) {
+        try {
+            MediaAsset asset = mediaAssetRepository.findById(assetId).orElse(null);
+            if (asset == null || asset.getUploadStatus() != UploadStatus.UPLOADED) {
+                return;
+            }
+            generateWebAssetsFromStorage(asset);
+            mediaAssetRepository.save(asset);
+        } catch (RuntimeException exception) {
+            log.warn("Queued web asset generation failed for {}", assetId, exception);
+        } finally {
+            queuedProcessingAssetIds.remove(assetId);
+        }
     }
 
     private void deleteObjects(MediaAsset asset) {

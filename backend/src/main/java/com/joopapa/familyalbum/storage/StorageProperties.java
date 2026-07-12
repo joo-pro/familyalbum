@@ -11,6 +11,7 @@ public record StorageProperties(
         String bucket,
         String endpoint,
         Duration uploadUrlTtl,
-        Duration downloadUrlTtl
+        Duration downloadUrlTtl,
+        Duration inlineUrlTtl
 ) {
 }
