@@ -1,5 +1,5 @@
 <script setup>
-import { computed, onMounted, ref } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
 
 const defaultConfig = {
   appTitle: '지웅이 성장일기',
@@ -18,6 +18,15 @@ const isDetailMenuOpen = ref(false)
 const isDetailInfoOpen = ref(false)
 const touchStartX = ref(null)
 const fileInput = ref(null)
+const pageSentinel = ref(null)
+const nextCursor = ref(null)
+const isLoadingAssets = ref(false)
+const hasMoreAssets = ref(true)
+const visibleThumbnailIds = ref(new Set())
+
+let loadMoreObserver
+let thumbnailObserver
+
 
 const totalSize = computed(() => selectedFiles.value.reduce((sum, file) => sum + file.size, 0))
 const selectedCount = computed(() => selectedAssetIds.value.size)
@@ -53,6 +62,13 @@ const timelineGroups = computed(() => {
 
 onMounted(async () => {
   await Promise.all([loadAppConfig(), loadAssets()])
+  await nextTick()
+  setupLoadMoreObserver()
+})
+
+onBeforeUnmount(() => {
+  loadMoreObserver?.disconnect()
+  thumbnailObserver?.disconnect()
 })
 
 async function loadAppConfig() {
@@ -69,16 +85,83 @@ async function loadAppConfig() {
 }
 
 async function loadAssets() {
+  assets.value = []
+  nextCursor.value = null
+  hasMoreAssets.value = true
+  visibleThumbnailIds.value = new Set()
+  thumbnailObserver?.disconnect()
+  thumbnailObserver = null
+  await loadNextAssets()
+}
+
+async function loadNextAssets() {
+  if (isLoadingAssets.value || !hasMoreAssets.value) return
+  isLoadingAssets.value = true
   try {
-    const response = await fetch('/api/media')
+    const params = new URLSearchParams({ limit: '48' })
+    if (nextCursor.value) params.set('cursor', nextCursor.value)
+    const response = await fetch(`/api/media?${params}`)
     if (response.ok) {
-      assets.value = await response.json()
+      const page = await response.json()
+      assets.value = [...assets.value, ...(page.items ?? [])]
+      nextCursor.value = page.nextCursor ?? null
+      hasMoreAssets.value = Boolean(page.hasMore)
+      await nextTick()
+      setupLoadMoreObserver()
     }
   } catch {
-    assets.value = []
+    if (!nextCursor.value) assets.value = []
+  } finally {
+    isLoadingAssets.value = false
   }
 }
 
+function setupLoadMoreObserver() {
+  if (!pageSentinel.value) return
+  loadMoreObserver?.disconnect()
+  loadMoreObserver = new IntersectionObserver((entries) => {
+    if (entries.some((entry) => entry.isIntersecting)) {
+      loadNextAssets()
+    }
+  }, { rootMargin: '720px 0px' })
+  loadMoreObserver.observe(pageSentinel.value)
+}
+
+function ensureThumbnailObserver() {
+  if (thumbnailObserver) return thumbnailObserver
+  thumbnailObserver = new IntersectionObserver((entries) => {
+    const next = new Set(visibleThumbnailIds.value)
+    for (const entry of entries) {
+      if (!entry.isIntersecting) continue
+      const assetId = entry.target.dataset.assetId
+      if (assetId) next.add(assetId)
+      thumbnailObserver.unobserve(entry.target)
+    }
+    visibleThumbnailIds.value = next
+  }, { rootMargin: '520px 0px' })
+  return thumbnailObserver
+}
+
+const vLazyThumbnail = {
+  mounted(el, binding) {
+    el.dataset.assetId = binding.value
+    ensureThumbnailObserver().observe(el)
+  },
+  updated(el, binding) {
+    if (el.dataset.assetId === binding.value) return
+    el.dataset.assetId = binding.value
+    if (!visibleThumbnailIds.value.has(binding.value)) {
+      ensureThumbnailObserver().observe(el)
+    }
+  },
+  unmounted(el) {
+    thumbnailObserver?.unobserve(el)
+  },
+}
+
+function isThumbnailVisible(assetId) {
+  return visibleThumbnailIds.value.has(assetId)
+}
 function openFilePicker() {
   fileInput.value?.click()
   isActionMenuOpen.value = false
@@ -416,8 +499,9 @@ function formatBytes(bytes) {
               :aria-label="`${asset.filename} ${isSelectionMode ? '선택하기' : '자세히 보기'}`"
               @click="handleAssetClick(asset)"
             >
-              <div class="asset-thumb">
-                <img :src="mediaThumbnailUrl(asset)" :alt="asset.filename" loading="lazy" />
+              <div class="asset-thumb" v-lazy-thumbnail="asset.id">
+                <img v-if="isThumbnailVisible(asset.id)" :src="mediaThumbnailUrl(asset)" :alt="asset.filename" loading="lazy" decoding="async" />
+                <div v-else class="asset-thumb-placeholder" aria-hidden="true"></div>
                 <span v-if="asset.mediaType === 'VIDEO'" class="video-badge" aria-hidden="true">▶</span>
                 <span v-if="isSelectionMode" class="select-badge" :class="{ 'is-on': isSelected(asset.id) }" aria-hidden="true">
                   {{ isSelected(asset.id) ? '✓' : '' }}
@@ -426,6 +510,10 @@ function formatBytes(bytes) {
             </button>
           </div>
         </section>
+      </div>
+
+      <div v-if="assets.length && hasMoreAssets" ref="pageSentinel" class="load-more-sentinel" aria-live="polite">
+        {{ isLoadingAssets ? '불러오는 중' : '더 보기' }}
       </div>
     </section>
 

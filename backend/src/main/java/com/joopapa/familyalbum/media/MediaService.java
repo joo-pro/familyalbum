@@ -4,6 +4,7 @@ import com.joopapa.familyalbum.storage.StorageProperties;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionSynchronization;
@@ -34,6 +35,7 @@ import java.security.NoSuchAlgorithmException;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Base64;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
@@ -75,6 +77,54 @@ public class MediaService {
         return mediaAssetRepository.findTimeline().stream()
                 .map(MediaDtos.MediaAssetResponse::from)
                 .toList();
+    }
+    @Transactional(readOnly = true)
+    public MediaDtos.MediaPageResponse listAssetsPage(String cursor, int limit) {
+        int pageSize = Math.clamp(limit, 1, 80);
+        TimelineCursor timelineCursor = decodeCursor(cursor);
+        List<MediaAsset> page = mediaAssetRepository.findTimelinePage(
+                timelineCursor.date(),
+                timelineCursor.createdAt(),
+                PageRequest.of(0, pageSize + 1)
+        );
+        boolean hasMore = page.size() > pageSize;
+        List<MediaAsset> visiblePage = hasMore ? page.subList(0, pageSize) : page;
+        String nextCursor = hasMore && !visiblePage.isEmpty()
+                ? encodeCursor(visiblePage.getLast())
+                : null;
+        return new MediaDtos.MediaPageResponse(
+                visiblePage.stream().map(MediaDtos.MediaAssetResponse::from).toList(),
+                nextCursor,
+                hasMore
+        );
+    }
+
+    private record TimelineCursor(Instant date, Instant createdAt) {
+    }
+
+    private static TimelineCursor decodeCursor(String cursor) {
+        if (cursor == null || cursor.isBlank()) {
+            return new TimelineCursor(null, null);
+        }
+        try {
+            String decoded = new String(Base64.getUrlDecoder().decode(cursor), StandardCharsets.UTF_8);
+            String[] parts = decoded.split("\\|", 2);
+            if (parts.length != 2) {
+                return new TimelineCursor(null, null);
+            }
+            return new TimelineCursor(Instant.parse(parts[0]), Instant.parse(parts[1]));
+        } catch (RuntimeException exception) {
+            return new TimelineCursor(null, null);
+        }
+    }
+
+    private static String encodeCursor(MediaAsset asset) {
+        String raw = assetDate(asset) + "|" + asset.getCreatedAt();
+        return Base64.getUrlEncoder().withoutPadding().encodeToString(raw.getBytes(StandardCharsets.UTF_8));
+    }
+
+    private static Instant assetDate(MediaAsset asset) {
+        return asset.getCapturedAt() != null ? asset.getCapturedAt() : asset.getCreatedAt();
     }
 
     @Transactional
@@ -489,7 +539,7 @@ public class MediaService {
                     "-y",
                     "-i", originalFile.toString(),
                     "-frames:v", "1",
-                    "-vf", "scale=640:640:force_original_aspect_ratio=decrease",
+                    "-vf", "scale=384:384:force_original_aspect_ratio=decrease",
                     "-q:v", "4",
                     thumbnailFile.toString()
             ));
@@ -602,7 +652,7 @@ public class MediaService {
                     "-ss", "00:00:01",
                     "-i", originalFile.toString(),
                     "-frames:v", "1",
-                    "-vf", "scale=640:-2",
+                    "-vf", "scale=384:-2",
                     "-q:v", "4",
                     thumbnailFile.toString()
             ));

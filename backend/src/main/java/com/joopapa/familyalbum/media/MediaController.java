@@ -40,8 +40,11 @@ public class MediaController {
     }
 
     @GetMapping("/media")
-    List<MediaDtos.MediaAssetResponse> listMedia() {
-        return mediaService.listAssets();
+    MediaDtos.MediaPageResponse listMedia(
+            @RequestParam(value = "cursor", required = false) String cursor,
+            @RequestParam(value = "limit", defaultValue = "48") int limit
+    ) {
+        return mediaService.listAssetsPage(cursor, limit);
     }
 
     @PostMapping("/media/upload")

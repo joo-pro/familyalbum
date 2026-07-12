@@ -40,6 +40,13 @@ public final class MediaDtos {
     public record DeleteMediaResponse(int deletedCount) {
     }
 
+    public record MediaPageResponse(
+            List<MediaAssetResponse> items,
+            String nextCursor,
+            boolean hasMore
+    ) {
+    }
+
     public record MediaAssetResponse(
             UUID id,
             String filename,
