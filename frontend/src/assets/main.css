@@ -13,88 +13,28 @@
 .hero-section {
   position: relative;
   overflow: hidden;
-  min-height: 430px;
   border: 1px solid rgba(137, 197, 238, 0.5);
-  border-radius: 28px;
+  border-radius: 24px;
   background:
-    linear-gradient(135deg, rgba(255, 255, 255, 0.92), rgba(217, 240, 255, 0.86)),
+    linear-gradient(135deg, rgba(255, 255, 255, 0.94), rgba(217, 240, 255, 0.84)),
     linear-gradient(160deg, #c9e9ff, #f6fbff);
-  box-shadow: 0 24px 70px rgba(77, 139, 186, 0.18);
+  box-shadow: 0 20px 54px rgba(77, 139, 186, 0.15);
 }
 
-.hero-section::after {
-  position: absolute;
-  right: clamp(20px, 8vw, 100px);
-  bottom: -72px;
-  width: 260px;
-  height: 260px;
-  border-radius: 50%;
-  background: rgba(144, 208, 248, 0.24);
-  content: '';
-}
 
-.top-nav {
-  position: relative;
-  z-index: 1;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-  padding: 22px 24px 0;
-}
 
-.brand-mark {
-  display: grid;
-  place-items: center;
-  width: 42px;
-  height: 42px;
-  border-radius: 14px;
-  background: #ffffff;
-  color: #3c86c3;
-  font-size: 13px;
-  font-weight: 900;
-  box-shadow: 0 12px 30px rgba(77, 139, 186, 0.14);
-}
 
-.status-pill {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  min-width: max-content;
-  padding: 9px 12px;
-  border: 1px solid rgba(132, 189, 226, 0.48);
-  border-radius: 999px;
-  background: rgba(255, 255, 255, 0.78);
-  color: #3e6f95;
-  font-size: 13px;
-  font-weight: 800;
-}
-
-.status-pill span {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: #53c486;
-  box-shadow: 0 0 0 4px rgba(83, 196, 134, 0.15);
-}
-
-.status-pill.is-offline span {
-  background: #f0a15e;
-  box-shadow: 0 0 0 4px rgba(240, 161, 94, 0.18);
-}
 
 .hero-grid {
   position: relative;
   z-index: 1;
-  display: grid;
-  grid-template-columns: minmax(0, 1.4fr) minmax(280px, 0.65fr);
-  gap: 28px;
-  align-items: end;
-  padding: 56px 40px 40px;
+  display: block;
+  padding: 34px 34px 30px;
 }
 
 .hero-copy {
-  max-width: 650px;
+  display: grid;
+  gap: 24px;
 }
 
 .eyebrow {
@@ -121,14 +61,7 @@ h1 {
   line-height: 1.04;
 }
 
-.hero-subtitle {
-  max-width: 520px;
-  margin-top: 18px;
-  color: #496a82;
-  font-size: 18px;
-  font-weight: 650;
-  line-height: 1.7;
-}
+
 
 .hero-actions {
   display: flex;
@@ -200,67 +133,22 @@ h1 {
   transform: none;
 }
 
-.today-panel {
-  display: grid;
-  gap: 14px;
-}
 
-.date-card,
-.metric-grid > div,
+
 .upload-summary,
 .empty-state,
 .asset-card,
 .detail-panel {
-  border: 1px solid rgba(145, 196, 230, 0.44);
-  border-radius: 22px;
-  background: rgba(255, 255, 255, 0.72);
-  box-shadow: 0 18px 50px rgba(80, 137, 181, 0.13);
-  backdrop-filter: blur(18px);
-}
-
-.date-card {
+  position: relative;
   display: grid;
-  gap: 8px;
-  min-height: 160px;
-  padding: 22px;
+  grid-template-columns: minmax(280px, 1.1fr) minmax(280px, 0.9fr);
+  width: min(980px, 100%);
+  max-height: min(820px, 92vh);
+  overflow: auto;
+  background: rgba(255, 255, 255, 0.96);
 }
 
-.date-card span {
-  color: #5f7f98;
-  font-weight: 800;
-}
 
-.date-card strong {
-  align-self: end;
-  color: #1f4d70;
-  font-size: 34px;
-  font-weight: 950;
-  line-height: 1.05;
-}
-
-.metric-grid {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 10px;
-}
-
-.metric-grid > div {
-  display: grid;
-  gap: 4px;
-  padding: 16px;
-}
-
-.metric-grid strong {
-  color: #1f5f91;
-  font-size: 26px;
-  font-weight: 950;
-}
-
-.metric-grid span {
-  color: #66859d;
-  font-size: 13px;
-  font-weight: 800;
-}
 
 .upload-summary {
   display: flex;
@@ -312,11 +200,7 @@ h1 {
   gap: 10px;
 }
 
-.section-heading h2 {
-  color: #1f3851;
-  font-size: 28px;
-  font-weight: 950;
-}
+
 
 .ghost-button {
   min-height: 42px;
@@ -489,10 +373,10 @@ h1 {
   position: relative;
   display: grid;
   grid-template-columns: minmax(280px, 1.1fr) minmax(280px, 0.9fr);
-  width: min(920px, 100%);
-  max-height: min(760px, 92vh);
-  overflow: hidden;
-  background: rgba(255, 255, 255, 0.94);
+  width: min(980px, 100%);
+  max-height: min(820px, 92vh);
+  overflow: auto;
+  background: rgba(255, 255, 255, 0.96);
 }
 
 .detail-close {
@@ -580,17 +464,15 @@ h1 {
 }
 
 @media (max-width: 860px) {
-  .hero-grid,
   .detail-panel {
     grid-template-columns: 1fr;
+    width: min(560px, 100%);
+    max-height: 92vh;
+    overflow: auto;
   }
 
   .hero-grid {
-    padding: 44px 24px 28px;
-  }
-
-  .today-panel {
-    max-width: none;
+    padding: 30px 24px 26px;
   }
 
   .detail-preview {
@@ -604,24 +486,15 @@ h1 {
   }
 
   .hero-section {
-    min-height: auto;
-    border-radius: 22px;
-  }
-
-  .top-nav {
-    padding: 16px 16px 0;
+    border-radius: 18px;
   }
 
   .hero-grid {
-    padding: 36px 18px 20px;
+    padding: 26px 18px 20px;
   }
 
   h1 {
-    font-size: 42px;
-  }
-
-  .hero-subtitle {
-    font-size: 16px;
+    font-size: 40px;
   }
 
   .hero-actions,
@@ -638,24 +511,65 @@ h1 {
     width: 100%;
   }
 
-  .metric-grid {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-  }
-
-  .metric-grid > div {
-    padding: 12px;
-  }
-
   .gallery-grid {
     grid-template-columns: repeat(3, minmax(0, 1fr));
     gap: 4px;
   }
 
   .detail-backdrop {
-    padding: 10px;
+    align-items: stretch;
+    padding: 8px;
+  }
+
+  .detail-panel {
+    width: 100%;
+    max-height: calc(100vh - 16px);
+    overflow: auto;
+  }
+
+  .detail-preview {
+    min-height: 54vh;
   }
 
   .detail-info {
-    padding: 24px;
+    padding: 22px;
   }
+
+  .detail-nav {
+    top: calc(27vh + 8px);
+    width: 38px;
+    height: 48px;
+    font-size: 32px;
+  }
+}
+.detail-nav {
+  position: absolute;
+  top: 50%;
+  z-index: 2;
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 56px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.86);
+  color: #285a80;
+  font-size: 38px;
+  font-weight: 900;
+  line-height: 1;
+  box-shadow: 0 12px 28px rgba(20, 50, 76, 0.18);
+  cursor: pointer;
+  transform: translateY(-50%);
+}
+
+.detail-nav:disabled {
+  cursor: not-allowed;
+  opacity: 0.26;
+}
+
+.detail-prev {
+  left: 14px;
+}
+
+.detail-next {
+  right: 14px;
 }
