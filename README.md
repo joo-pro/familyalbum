@@ -54,6 +54,18 @@ docker-compose.prod.yml  Lightsail 운영 배포용
 docs/                    서버 배포 문서
 ```
 
+
+## 앱 타이틀 설정
+
+서비스 이름과 문구는 `frontend/public/app-config.json`에서 런타임으로 주입합니다. 포크해서 사용할 때 이 파일만 바꾸면 빌드 코드 수정 없이 제목을 바꿀 수 있습니다.
+
+```json
+{
+  "appTitle": "지웅이 성장일기",
+  "appSubtitle": "우리 가족이 함께 기록하는 사진과 동영상 앨범",
+  "babyName": "지웅이"
+}
+```
 ## 로컬 실행
 
 ### 1. PostgreSQL 실행
