@@ -1,4 +1,4 @@
-<script setup>
+﻿<script setup>
 import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
 
 const defaultConfig = {
@@ -10,12 +10,16 @@ const assets = ref([])
 const selectedFiles = ref([])
 const isUploading = ref(false)
 const uploadMessage = ref('')
+const uploadProgress = ref(0)
+const uploadLoadedBytes = ref(0)
+const currentUploadIndex = ref(0)
 const activeAsset = ref(null)
 const isSelectionMode = ref(false)
 const selectedAssetIds = ref(new Set())
 const isActionMenuOpen = ref(false)
 const isDetailMenuOpen = ref(false)
 const isDetailInfoOpen = ref(false)
+const toastMessage = ref('')
 const touchStartX = ref(null)
 const fileInput = ref(null)
 const pageSentinel = ref(null)
@@ -27,9 +31,16 @@ const visibleThumbnailIds = ref(new Set())
 
 let loadMoreObserver
 let thumbnailObserver
+let toastTimer
+let previousBodyOverflow = ''
 
 
 const totalSize = computed(() => selectedFiles.value.reduce((sum, file) => sum + file.size, 0))
+const uploadProgressPercent = computed(() => Math.min(100, Math.round(uploadProgress.value)))
+const uploadStatusText = computed(() => {
+  if (!isUploading.value) return selectedFiles.value.length ? `${selectedFiles.value.length}개 선택됨` : '업로드 상태'
+  return `${currentUploadIndex.value}/${selectedFiles.value.length}개 업로드 중`
+})
 const selectedCount = computed(() => selectedAssetIds.value.size)
 const selectedAssetIdList = computed(() => Array.from(selectedAssetIds.value))
 const eagerThumbnailIds = computed(() => new Set(assets.value.slice(0, 30).map((asset) => asset.id)))
@@ -187,6 +198,9 @@ function openFilePicker() {
 function onFileChange(event) {
   selectedFiles.value = Array.from(event.target.files ?? [])
   uploadMessage.value = ''
+  uploadProgress.value = 0
+  uploadLoadedBytes.value = 0
+  currentUploadIndex.value = 0
 }
 
 async function uploadSelectedFiles() {
@@ -195,49 +209,73 @@ async function uploadSelectedFiles() {
   isActionMenuOpen.value = false
   isUploading.value = true
   uploadMessage.value = '업로드를 준비하고 있어요.'
+  uploadProgress.value = 0
+  uploadLoadedBytes.value = 0
+  currentUploadIndex.value = 0
 
   try {
     let uploadedCount = 0
     let duplicateCount = 0
+    let completedBytes = 0
 
-    for (const file of selectedFiles.value) {
+    for (const [index, file] of selectedFiles.value.entries()) {
+      currentUploadIndex.value = index + 1
       uploadMessage.value = `${file.name} 업로드 중이에요.`
 
-      const formData = new FormData()
-      formData.append('file', file)
-      formData.append('capturedAt', new Date(file.lastModified).toISOString())
-
-      const response = await fetch('/api/media/upload', {
-        method: 'POST',
-        body: formData,
+      const result = await uploadFileWithProgress(file, (loaded) => {
+        uploadLoadedBytes.value = completedBytes + loaded
+        uploadProgress.value = totalSize.value ? (uploadLoadedBytes.value / totalSize.value) * 100 : 0
       })
+      completedBytes += file.size
+      uploadLoadedBytes.value = completedBytes
+      uploadProgress.value = totalSize.value ? (completedBytes / totalSize.value) * 100 : 100
 
-      if (!response.ok) {
-        const message = await response.text()
-        throw new Error(message || '업로드에 실패했어요.')
-      }
-
-      const result = await response.json()
-      if (result.duplicate) {
-        duplicateCount += 1
-      } else {
-        uploadedCount += 1
-      }
+      if (result.duplicate) duplicateCount += 1
+      else uploadedCount += 1
     }
 
+    uploadProgress.value = 100
     uploadMessage.value = duplicateCount > 0
       ? `업로드 완료: 새 파일 ${uploadedCount}개, 중복 ${duplicateCount}개 건너뜀`
       : '업로드가 완료됐어요.'
+    showToast(uploadMessage.value)
     selectedFiles.value = []
     if (fileInput.value) fileInput.value.value = ''
     await loadAssets()
   } catch (error) {
     uploadMessage.value = error.message
+    showToast(error.message)
   } finally {
     isUploading.value = false
   }
 }
 
+function uploadFileWithProgress(file, onProgress) {
+  return new Promise((resolve, reject) => {
+    const formData = new FormData()
+    formData.append('file', file)
+    formData.append('capturedAt', new Date(file.lastModified).toISOString())
+
+    const request = new XMLHttpRequest()
+    request.open('POST', '/api/media/upload')
+    request.upload.onprogress = (event) => {
+      if (event.lengthComputable) onProgress(event.loaded)
+    }
+    request.onload = () => {
+      if (request.status < 200 || request.status >= 300) {
+        reject(new Error(request.responseText || '업로드에 실패했어요.'))
+        return
+      }
+      try {
+        resolve(JSON.parse(request.responseText))
+      } catch {
+        reject(new Error('업로드 응답을 읽지 못했어요.'))
+      }
+    }
+    request.onerror = () => reject(new Error('네트워크 문제로 업로드하지 못했어요.'))
+    request.send(formData)
+  })
+}
 function handleAssetClick(asset) {
   if (isSelectionMode.value) {
     toggleAssetSelection(asset.id)
@@ -250,14 +288,24 @@ function openAsset(asset) {
   activeAsset.value = asset
   isDetailMenuOpen.value = false
   isDetailInfoOpen.value = false
+  lockBackground()
 }
 
 function closeAsset() {
   activeAsset.value = null
   isDetailMenuOpen.value = false
   isDetailInfoOpen.value = false
+  unlockBackground()
 }
 
+function lockBackground() {
+  previousBodyOverflow = document.body.style.overflow
+  document.body.style.overflow = 'hidden'
+}
+
+function unlockBackground() {
+  document.body.style.overflow = previousBodyOverflow
+}
 function toggleDetailInfo() {
   isDetailInfoOpen.value = !isDetailInfoOpen.value
   isDetailMenuOpen.value = false
@@ -330,42 +378,53 @@ async function refreshAssets() {
 
 async function downloadAsset(asset) {
   isDetailMenuOpen.value = false
-  if (isMobileDevice.value) {
-    await shareAssets([asset])
-    return
+  try {
+    if (isMobileDevice.value) {
+      await shareAssets([asset])
+      return
+    }
+
+    const response = await fetch(`/api/media/${asset.id}/download-url`, { method: 'POST' })
+    if (!response.ok) throw new Error('다운로드 링크를 만들지 못했어요.')
+    const payload = await response.json()
+    window.location.href = payload.downloadUrl
+    showToast('다운로드를 시작했어요.')
+  } catch (error) {
+    showToast(error.message)
+    throw error
   }
-
-  const response = await fetch(`/api/media/${asset.id}/download-url`, { method: 'POST' })
-  if (!response.ok) throw new Error('다운로드 링크를 만들지 못했어요.')
-  const payload = await response.json()
-  window.location.href = payload.downloadUrl
 }
-
 async function downloadSelectedAssets() {
   if (selectedCount.value === 0) return
   isActionMenuOpen.value = false
-  const selectedAssets = assets.value.filter((asset) => selectedAssetIds.value.has(asset.id))
+  try {
+    const selectedAssets = assets.value.filter((asset) => selectedAssetIds.value.has(asset.id))
 
-  if (isMobileDevice.value) {
-    await shareAssets(selectedAssets)
-    return
+    if (isMobileDevice.value) {
+      await shareAssets(selectedAssets)
+      return
+    }
+
+    const response = await fetch('/api/media/download', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ assetIds: selectedAssetIdList.value }),
+    })
+    if (!response.ok) throw new Error('선택한 파일을 다운로드하지 못했어요.')
+    const blob = await response.blob()
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = 'familyalbum-media.zip'
+    document.body.appendChild(link)
+    link.click()
+    link.remove()
+    URL.revokeObjectURL(url)
+    showToast('선택한 파일 다운로드를 시작했어요.')
+  } catch (error) {
+    showToast(error.message)
+    throw error
   }
-
-  const response = await fetch('/api/media/download', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ assetIds: selectedAssetIdList.value }),
-  })
-  if (!response.ok) throw new Error('선택한 파일을 다운로드하지 못했어요.')
-  const blob = await response.blob()
-  const url = URL.createObjectURL(blob)
-  const link = document.createElement('a')
-  link.href = url
-  link.download = 'familyalbum-media.zip'
-  document.body.appendChild(link)
-  link.click()
-  link.remove()
-  URL.revokeObjectURL(url)
 }
 
 async function shareAssets(targetAssets) {
@@ -383,6 +442,7 @@ async function shareAssets(targetAssets) {
       title: appConfig.value.appTitle,
       text: 'FamilyAlbum에서 저장할 사진과 동영상이에요.',
     })
+    showToast('공유 화면을 열었어요.')
     return
   }
 
@@ -390,6 +450,7 @@ async function shareAssets(targetAssets) {
     const url = URL.createObjectURL(files[0])
     window.open(url, '_blank', 'noopener')
     window.setTimeout(() => URL.revokeObjectURL(url), 60_000)
+    showToast('파일을 열었어요.')
     return
   }
 
@@ -420,6 +481,13 @@ async function deleteSelectedAssets() {
   await loadAssets()
 }
 
+function showToast(message) {
+  toastMessage.value = message
+  window.clearTimeout(toastTimer)
+  toastTimer = window.setTimeout(() => {
+    toastMessage.value = ''
+  }, 2600)
+}
 function mediaViewUrl(asset) {
   return `/api/media/${asset.id}/view`
 }
@@ -479,12 +547,20 @@ function formatBytes(bytes) {
     <input ref="fileInput" class="hidden-file-input" type="file" multiple accept="image/*,video/*,.heic,.heif,.heics,.heifs,.mov,.m4v,image/heic,image/heif,video/quicktime" @change="onFileChange" />
 
     <section v-if="selectedFiles.length || uploadMessage" class="upload-summary" aria-live="polite">
-      <div>
-        <strong v-if="selectedFiles.length">{{ selectedFiles.length }}개 선택됨</strong>
-        <strong v-else>업로드 상태</strong>
-        <span>{{ selectedFiles.length ? formatBytes(totalSize) : uploadMessage }}</span>
+      <div class="upload-summary-main">
+        <div>
+          <strong>{{ uploadStatusText }}</strong>
+          <span>{{ selectedFiles.length ? formatBytes(totalSize) : uploadMessage }}</span>
+        </div>
+        <button class="upload-inline-button" type="button" :disabled="!selectedFiles.length || isUploading" @click="uploadSelectedFiles">
+          {{ uploadButtonLabel }}
+        </button>
       </div>
-      <p v-if="uploadMessage && selectedFiles.length">{{ uploadMessage }}</p>
+      <div v-if="isUploading || uploadProgress > 0" class="upload-progress" role="progressbar" :aria-valuenow="uploadProgressPercent" aria-valuemin="0" aria-valuemax="100">
+        <div class="upload-progress-track"><span :style="{ width: `${uploadProgressPercent}%` }"></span></div>
+        <strong>{{ uploadProgressPercent }}%</strong>
+      </div>
+      <p v-if="uploadMessage">{{ uploadMessage }}</p>
     </section>
 
     <section class="content-section">
@@ -549,9 +625,6 @@ function formatBytes(bytes) {
     <div class="floating-actions" :class="{ 'is-open': isActionMenuOpen }">
       <div v-if="isActionMenuOpen" class="floating-menu" role="menu">
         <button type="button" role="menuitem" @click="openFilePicker">사진/동영상 선택</button>
-        <button type="button" role="menuitem" :disabled="!selectedFiles.length || isUploading" @click="uploadSelectedFiles">
-          {{ uploadButtonLabel }}
-        </button>
         <button type="button" role="menuitem" @click="toggleSelectionMode">
           {{ isSelectionMode ? '선택 취소' : '선택 모드' }}
         </button>
@@ -577,7 +650,7 @@ function formatBytes(bytes) {
       </button>
     </div>
 
-    <div v-if="activeAsset" class="detail-backdrop" @click.self="closeAsset">
+    <div v-if="activeAsset" class="detail-backdrop" @click.self="closeAsset" @wheel.prevent @touchmove.self.prevent>
       <article class="detail-panel" role="dialog" aria-modal="true" aria-labelledby="asset-detail-title">
         <button class="detail-close" type="button" aria-label="닫기" @click="closeAsset">×</button>
         <button class="detail-nav detail-prev" type="button" :disabled="!hasPreviousAsset" aria-label="이전 사진" @click="showPreviousAsset">‹</button>
@@ -595,10 +668,10 @@ function formatBytes(bytes) {
         </div>
         <div class="detail-quick-actions">
           <div v-if="isDetailMenuOpen" class="detail-menu" role="menu">
-            <button type="button" role="menuitem" @click="downloadAsset(activeAsset)">{{ downloadActionLabel }}</button>
             <button type="button" role="menuitem" @click="toggleDetailInfo">상세</button>
             <button type="button" role="menuitem" class="danger-button" @click="deleteAsset(activeAsset)">삭제</button>
           </div>
+          <button class="detail-save-trigger" type="button" :aria-label="downloadActionLabel" @click="downloadAsset(activeAsset)">&#8595;</button>
           <button class="detail-menu-trigger" type="button" :aria-expanded="isDetailMenuOpen" aria-label="상세 조작 메뉴" @click="isDetailMenuOpen = !isDetailMenuOpen">i</button>
         </div>
 
@@ -626,5 +699,6 @@ function formatBytes(bytes) {
         </div>
       </article>
     </div>
+    <div v-if="toastMessage" class="toast-message" role="status" aria-live="polite">{{ toastMessage }}</div>
   </main>
 </template>

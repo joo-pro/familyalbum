@@ -1,4 +1,4 @@
-@import './base.css';
+﻿@import './base.css';
 
 #app {
   min-height: 100vh;
@@ -161,6 +161,54 @@ h1 {
   font-weight: 700;
 }
 
+
+.upload-inline-button {
+  flex: 0 0 auto;
+  min-height: 42px;
+  padding: 0 16px;
+  border-radius: 14px;
+  background: #247ec0;
+  color: #ffffff;
+  font-size: 14px;
+  font-weight: 950;
+  box-shadow: 0 12px 28px rgba(36, 126, 192, 0.25);
+  cursor: pointer;
+}
+
+.upload-inline-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.upload-progress {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  gap: 12px;
+}
+
+.upload-progress-track {
+  height: 9px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: rgba(173, 218, 245, 0.42);
+}
+
+.upload-progress-track span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #75c7f1, #247ec0);
+  transition: width 180ms ease;
+}
+
+.upload-progress strong {
+  min-width: 42px;
+  color: #235d88;
+  font-size: 13px;
+  font-weight: 950;
+  text-align: right;
+}
 .content-section {
   padding: 34px 2px 10px;
 }
@@ -508,6 +556,7 @@ h1 {
   gap: 10px;
 }
 
+.detail-save-trigger,
 .detail-menu-trigger {
   display: grid;
   place-items: center;
@@ -524,6 +573,17 @@ h1 {
   cursor: pointer;
 }
 
+
+.detail-save-trigger {
+  font-size: 24px;
+  font-family: inherit;
+  font-style: normal;
+}
+
+.detail-menu-trigger {
+  font-family: Georgia, 'Times New Roman', serif;
+  font-style: italic;
+}
 .detail-menu {
   display: grid;
   gap: 8px;
@@ -809,4 +869,33 @@ h1 {
 
 .floating-actions.is-open .floating-trigger {
   background: #1d689d;
+}
+
+.toast-message {
+  position: fixed;
+  left: 50%;
+  bottom: max(22px, env(safe-area-inset-bottom));
+  z-index: 40;
+  width: max-content;
+  max-width: min(420px, calc(100vw - 36px));
+  padding: 13px 16px;
+  border: 1px solid rgba(145, 196, 230, 0.42);
+  border-radius: 14px;
+  background: rgba(28, 77, 112, 0.94);
+  color: #ffffff;
+  font-size: 14px;
+  font-weight: 850;
+  text-align: center;
+  box-shadow: 0 18px 42px rgba(20, 50, 76, 0.28);
+  transform: translateX(-50%);
+}
+@media (max-width: 560px) {
+  .upload-summary-main {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .upload-inline-button {
+    width: 100%;
+  }
 }
