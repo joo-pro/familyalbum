@@ -111,15 +111,32 @@ public class MediaService {
                 PageRequest.of(0, batchSize)
         );
         int queuedCount = 0;
+        int alreadyQueuedCount = 0;
+        int thumbnailMissingCount = 0;
+        int previewMissingCount = 0;
         for (MediaAsset asset : candidates) {
+            if (!asset.hasThumbnail()) {
+                thumbnailMissingCount++;
+            }
+            if (needsPreviewGeneration(asset) && !asset.hasPreview()) {
+                previewMissingCount++;
+            }
             if (needsWebAssetGeneration(asset)) {
-                enqueueWebAssetGeneration(asset.getId());
-                queuedCount++;
+                if (enqueueWebAssetGeneration(asset.getId())) {
+                    queuedCount++;
+                } else {
+                    alreadyQueuedCount++;
+                }
             }
         }
-        return new MediaDtos.BackfillMediaResponse(candidates.size(), queuedCount);
+        return new MediaDtos.BackfillMediaResponse(
+                candidates.size(),
+                queuedCount,
+                alreadyQueuedCount,
+                thumbnailMissingCount,
+                previewMissingCount
+        );
     }
-
     private record TimelineCursor(Instant date, Instant createdAt) {
     }
 
@@ -440,9 +457,9 @@ public class MediaService {
     }
 
 
-    private void enqueueWebAssetGeneration(UUID assetId) {
+    private boolean enqueueWebAssetGeneration(UUID assetId) {
         if (!queuedProcessingAssetIds.add(assetId)) {
-            return;
+            return false;
         }
         Runnable task = () -> mediaProcessingExecutor.execute(() -> processQueuedWebAssetGeneration(assetId));
         if (TransactionSynchronizationManager.isSynchronizationActive()) {
@@ -459,9 +476,10 @@ public class MediaService {
                     }
                 }
             });
-            return;
+            return true;
         }
         task.run();
+        return true;
     }
 
     private void processQueuedWebAssetGeneration(UUID assetId) {
@@ -501,6 +519,10 @@ public class MediaService {
             return !asset.hasPreview() || !asset.hasThumbnail();
         }
         return isHeifImage(asset) && (!asset.hasPreview() || !asset.hasThumbnail());
+    }
+
+    private boolean needsPreviewGeneration(MediaAsset asset) {
+        return asset.getMediaType() == MediaType.VIDEO || isHeifImage(asset);
     }
 
     private void generateWebAssets(MediaAsset asset, Path originalFile) {
@@ -630,13 +652,25 @@ public class MediaService {
         try {
             Process process = new ProcessBuilder(command)
                     .redirectOutput(ProcessBuilder.Redirect.DISCARD)
-                    .redirectError(ProcessBuilder.Redirect.DISCARD)
+                    .redirectError(ProcessBuilder.Redirect.PIPE)
                     .start();
-            return process.waitFor();
+            String stderr = new String(process.getErrorStream().readAllBytes(), StandardCharsets.UTF_8).trim();
+            int exitCode = process.waitFor();
+            if (exitCode != 0 && !stderr.isBlank()) {
+                log.warn("ffmpeg failed with exit code {}. stderr: {}", exitCode, abbreviate(stderr, 1600));
+            }
+            return exitCode;
         } catch (InterruptedException exception) {
             Thread.currentThread().interrupt();
             return -1;
         }
+    }
+
+    private static String abbreviate(String value, int maxLength) {
+        if (value.length() <= maxLength) {
+            return value;
+        }
+        return value.substring(0, maxLength) + "...";
     }
 
     private void generateWebAssetsFromStorage(MediaAsset asset) {

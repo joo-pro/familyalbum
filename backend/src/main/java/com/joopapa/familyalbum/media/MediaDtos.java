@@ -41,7 +41,10 @@ public final class MediaDtos {
     }
     public record BackfillMediaResponse(
             int candidateCount,
-            int queuedCount
+            int queuedCount,
+            int alreadyQueuedCount,
+            int thumbnailMissingCount,
+            int previewMissingCount
     ) {
     }
 
