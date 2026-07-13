@@ -612,14 +612,12 @@ public class MediaService {
                     "-y",
                     "-i", originalFile.toString(),
                     "-map", "0:v:0",
-                    "-map", "0:a?",
+                    "-an",
                     "-vf", "scale=1920:1080:force_original_aspect_ratio=decrease:force_divisible_by=2",
                     "-c:v", "libx264",
                     "-preset", "veryfast",
                     "-crf", "23",
                     "-pix_fmt", "yuv420p",
-                    "-c:a", "aac",
-                    "-b:a", "128k",
                     "-movflags", "+faststart",
                     previewFile.toString()
             ));
