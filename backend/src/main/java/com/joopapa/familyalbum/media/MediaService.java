@@ -613,7 +613,7 @@ public class MediaService {
                     "-i", originalFile.toString(),
                     "-map", "0:v:0",
                     "-map", "0:a?",
-                    "-vf", "scale=1920:1080:force_original_aspect_ratio=decrease",
+                    "-vf", "scale=1920:1080:force_original_aspect_ratio=decrease:force_divisible_by=2",
                     "-c:v", "libx264",
                     "-preset", "veryfast",
                     "-crf", "23",
@@ -654,7 +654,7 @@ public class MediaService {
                     .redirectOutput(ProcessBuilder.Redirect.DISCARD)
                     .redirectError(ProcessBuilder.Redirect.PIPE)
                     .start();
-            String stderr = new String(process.getErrorStream().readAllBytes(), StandardCharsets.UTF_8).trim();
+            String stderr = compactLogLine(new String(process.getErrorStream().readAllBytes(), StandardCharsets.UTF_8));
             int exitCode = process.waitFor();
             if (exitCode != 0 && !stderr.isBlank()) {
                 log.warn("ffmpeg failed with exit code {}. stderr: {}", exitCode, abbreviate(stderr, 1600));
@@ -664,6 +664,10 @@ public class MediaService {
             Thread.currentThread().interrupt();
             return -1;
         }
+    }
+
+    private static String compactLogLine(String value) {
+        return value.replaceAll("\\s+", " ").trim();
     }
 
     private static String abbreviate(String value, int maxLength) {
