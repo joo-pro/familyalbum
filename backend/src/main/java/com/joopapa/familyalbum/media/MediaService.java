@@ -1,5 +1,6 @@
 package com.joopapa.familyalbum.media;
 
+import com.joopapa.familyalbum.push.FamilyPushNotificationService;
 import com.joopapa.familyalbum.storage.StorageProperties;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -55,6 +56,7 @@ public class MediaService {
     private final S3Client s3Client;
     private final S3Presigner s3Presigner;
     private final StorageProperties storageProperties;
+    private final FamilyPushNotificationService pushNotificationService;
     private final Executor mediaProcessingExecutor;
     private final Set<UUID> queuedProcessingAssetIds = ConcurrentHashMap.newKeySet();
 
@@ -63,12 +65,14 @@ public class MediaService {
             S3Client s3Client,
             S3Presigner s3Presigner,
             StorageProperties storageProperties,
+            FamilyPushNotificationService pushNotificationService,
             @Qualifier("mediaProcessingExecutor") Executor mediaProcessingExecutor
     ) {
         this.mediaAssetRepository = mediaAssetRepository;
         this.s3Client = s3Client;
         this.s3Presigner = s3Presigner;
         this.storageProperties = storageProperties;
+        this.pushNotificationService = pushNotificationService;
         this.mediaProcessingExecutor = mediaProcessingExecutor;
     }
 
@@ -482,6 +486,20 @@ public class MediaService {
         return true;
     }
 
+
+    private void notifyNewMediaAfterCommit(MediaAsset asset) {
+        Runnable task = () -> pushNotificationService.notifyNewMedia(asset);
+        if (TransactionSynchronizationManager.isSynchronizationActive()) {
+            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                @Override
+                public void afterCommit() {
+                    task.run();
+                }
+            });
+            return;
+        }
+        task.run();
+    }
     private void processQueuedWebAssetGeneration(UUID assetId) {
         try {
             MediaAsset asset = mediaAssetRepository.findById(assetId).orElse(null);

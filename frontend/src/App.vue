@@ -1,5 +1,6 @@
-﻿<script setup>
+<script setup>
 import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
+import appIconUrl from './assets/icon.png'
 
 const defaultConfig = {
   appTitle: '지웅이 성장일기',
@@ -28,11 +29,14 @@ const isLoadingAssets = ref(false)
 const assetLoadMessage = ref('')
 const hasMoreAssets = ref(true)
 const visibleThumbnailIds = ref(new Set())
+const pushState = ref('checking')
+const isPushLoading = ref(false)
 
 let loadMoreObserver
 let thumbnailObserver
 let toastTimer
 let previousBodyOverflow = ''
+let serviceWorkerRegistration
 
 
 const totalSize = computed(() => selectedFiles.value.reduce((sum, file) => sum + file.size, 0))
@@ -57,6 +61,18 @@ const uploadButtonLabel = computed(() => {
   if (selectedFiles.value.length > 0) return `${selectedFiles.value.length}개 업로드`
   return '업로드'
 })
+const canUseNotifications = computed(() => typeof window !== 'undefined'
+  && 'serviceWorker' in navigator
+  && 'PushManager' in window
+  && 'Notification' in window)
+const pushButtonLabel = computed(() => {
+  if (isPushLoading.value) return '알림 설정 중'
+  if (!canUseNotifications.value) return '알림 미지원'
+  if (pushState.value === 'subscribed') return '알림 켜짐'
+  if (pushState.value === 'blocked') return '알림 차단됨'
+  if (pushState.value === 'server-disabled') return '알림 서버 설정 필요'
+  return '새 기록 알림 켜기'
+})
 const timelineGroups = computed(() => {
   const groups = new Map()
   for (const asset of assets.value) {
@@ -74,7 +90,7 @@ const timelineGroups = computed(() => {
 })
 
 onMounted(async () => {
-  await Promise.all([loadAppConfig(), loadAssets()])
+  await Promise.all([loadAppConfig(), loadAssets(), initializePushNotifications()])
   await nextTick()
   setupLoadMoreObserver()
 })
@@ -97,6 +113,98 @@ async function loadAppConfig() {
   }
 }
 
+
+async function initializePushNotifications() {
+  if (!canUseNotifications.value) {
+    pushState.value = 'unsupported'
+    return
+  }
+
+  if (Notification.permission === 'denied') {
+    pushState.value = 'blocked'
+    return
+  }
+
+  try {
+    serviceWorkerRegistration = await navigator.serviceWorker.register('/sw.js')
+    const subscription = await serviceWorkerRegistration.pushManager.getSubscription()
+    pushState.value = subscription ? 'subscribed' : 'default'
+    if (subscription) await savePushSubscription(subscription)
+  } catch {
+    pushState.value = 'unsupported'
+  }
+}
+
+async function enablePushNotifications() {
+  isActionMenuOpen.value = false
+  if (!canUseNotifications.value) {
+    showToast('이 브라우저에서는 알림을 사용할 수 없어요.')
+    return
+  }
+  if (Notification.permission === 'denied') {
+    pushState.value = 'blocked'
+    showToast('브라우저 설정에서 알림 차단을 해제해 주세요.')
+    return
+  }
+
+  isPushLoading.value = true
+  try {
+    const permission = Notification.permission === 'granted'
+      ? 'granted'
+      : await Notification.requestPermission()
+    if (permission !== 'granted') {
+      pushState.value = permission === 'denied' ? 'blocked' : 'default'
+      showToast('알림 권한이 허용되지 않았어요.')
+      return
+    }
+
+    const keyResponse = await fetch('/api/push/public-key', { cache: 'no-store' })
+    if (!keyResponse.ok) throw new Error('알림 설정을 불러오지 못했어요.')
+    const keyPayload = await keyResponse.json()
+    if (!keyPayload.enabled || !keyPayload.publicKey) {
+      pushState.value = 'server-disabled'
+      showToast('서버 알림 키 설정이 필요해요.')
+      return
+    }
+
+    serviceWorkerRegistration = serviceWorkerRegistration || await navigator.serviceWorker.register('/sw.js')
+    let subscription = await serviceWorkerRegistration.pushManager.getSubscription()
+    if (!subscription) {
+      subscription = await serviceWorkerRegistration.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey: urlBase64ToUint8Array(keyPayload.publicKey),
+      })
+    }
+    await savePushSubscription(subscription)
+    pushState.value = 'subscribed'
+    showToast('새 기록 알림을 켰어요.')
+  } catch (error) {
+    showToast(error.message || '알림 설정에 실패했어요.')
+  } finally {
+    isPushLoading.value = false
+  }
+}
+
+async function savePushSubscription(subscription) {
+  const payload = subscription.toJSON()
+  const response = await fetch('/api/push/subscriptions', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  })
+  if (!response.ok) throw new Error('알림 구독을 저장하지 못했어요.')
+}
+
+function urlBase64ToUint8Array(value) {
+  const padding = '='.repeat((4 - value.length % 4) % 4)
+  const base64 = (value + padding).replace(/-/g, '+').replace(/_/g, '/')
+  const raw = window.atob(base64)
+  const output = new Uint8Array(raw.length)
+  for (let index = 0; index < raw.length; index += 1) {
+    output[index] = raw.charCodeAt(index)
+  }
+  return output
+}
 async function loadAssets() {
   assets.value = []
   nextCursor.value = null
@@ -539,11 +647,21 @@ function formatBytes(bytes) {
     <section class="hero-section">
       <div class="hero-grid">
         <div class="hero-copy">
-          <h1>{{ appConfig.appTitle }}</h1>
+          <div class="hero-brand">
+            <img class="hero-icon" :src="appIconUrl" alt="" aria-hidden="true" />
+            <div>
+              <span class="hero-kicker">Family Album</span>
+              <h1>{{ appConfig.appTitle }}</h1>
+            </div>
+          </div>
+        </div>
+        <div class="hero-keepsake" aria-hidden="true">
+          <span></span>
+          <span></span>
+          <span></span>
         </div>
       </div>
     </section>
-
     <input ref="fileInput" class="hidden-file-input" type="file" multiple accept="image/*,video/*,.heic,.heif,.heics,.heifs,.mov,.m4v,image/heic,image/heif,video/quicktime" @change="onFileChange" />
 
     <section v-if="selectedFiles.length || uploadMessage" class="upload-summary" aria-live="polite">
@@ -564,9 +682,16 @@ function formatBytes(bytes) {
     </section>
 
     <section class="content-section">
-      <div v-if="isSelectionMode" class="selection-chip">
-        <strong>{{ selectedCount }}개 선택됨</strong>
-        <button type="button" @click="toggleSelectionMode">취소</button>
+      <div v-if="isSelectionMode" class="selection-toolbar">
+        <div>
+          <strong>{{ selectedCount }}개 선택됨</strong>
+          <span>필요한 사진과 동영상을 고른 뒤 바로 처리할 수 있어요.</span>
+        </div>
+        <div class="selection-actions">
+          <button type="button" @click="toggleSelectionMode">선택 취소</button>
+          <button type="button" :disabled="selectedCount === 0" @click="downloadSelectedAssets">{{ downloadActionLabel }}</button>
+          <button type="button" :disabled="selectedCount === 0" class="danger-button" @click="deleteSelectedAssets">삭제</button>
+        </div>
       </div>
 
       <div v-if="assetLoadMessage && assets.length === 0" class="empty-state">
@@ -629,11 +754,8 @@ function formatBytes(bytes) {
           {{ isSelectionMode ? '선택 취소' : '선택 모드' }}
         </button>
         <button type="button" role="menuitem" @click="refreshAssets">새로고침</button>
-        <button v-if="isSelectionMode" type="button" role="menuitem" :disabled="selectedCount === 0" @click="downloadSelectedAssets">
-          선택 {{ downloadActionLabel }}
-        </button>
-        <button v-if="isSelectionMode" type="button" role="menuitem" :disabled="selectedCount === 0" class="danger-button" @click="deleteSelectedAssets">
-          선택 삭제
+        <button type="button" role="menuitem" :disabled="isPushLoading || pushState === 'subscribed' || pushState === 'blocked' || pushState === 'server-disabled'" @click="enablePushNotifications">
+          {{ pushButtonLabel }}
         </button>
       </div>
       <button

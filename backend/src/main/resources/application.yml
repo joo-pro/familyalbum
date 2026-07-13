@@ -32,3 +32,7 @@ app:
     upload-url-ttl: ${S3_UPLOAD_URL_TTL:PT15M}
     download-url-ttl: ${S3_DOWNLOAD_URL_TTL:PT10M}
     inline-url-ttl: ${S3_INLINE_URL_TTL:PT144H}
+  push:
+    vapid-public-key: ${APP_PUSH_VAPID_PUBLIC_KEY:}
+    vapid-private-key: ${APP_PUSH_VAPID_PRIVATE_KEY:}
+    subject: ${APP_PUSH_SUBJECT:mailto:hello@example.com}
