@@ -39,6 +39,11 @@ public final class MediaDtos {
 
     public record DeleteMediaResponse(int deletedCount) {
     }
+    public record BackfillMediaResponse(
+            int candidateCount,
+            int queuedCount
+    ) {
+    }
 
     public record MediaPageResponse(
             List<MediaAssetResponse> items,

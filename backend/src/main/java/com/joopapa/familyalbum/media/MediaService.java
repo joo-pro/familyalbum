@@ -101,6 +101,24 @@ public class MediaService {
                 hasMore
         );
     }
+    @Transactional(readOnly = true)
+    public MediaDtos.BackfillMediaResponse enqueueMissingWebAssets(int limit) {
+        int batchSize = Math.clamp(limit, 1, 500);
+        List<MediaAsset> candidates = mediaAssetRepository.findWebAssetBackfillCandidates(
+                UploadStatus.UPLOADED,
+                MediaType.VIDEO,
+                MediaType.IMAGE,
+                PageRequest.of(0, batchSize)
+        );
+        int queuedCount = 0;
+        for (MediaAsset asset : candidates) {
+            if (needsWebAssetGeneration(asset)) {
+                enqueueWebAssetGeneration(asset.getId());
+                queuedCount++;
+            }
+        }
+        return new MediaDtos.BackfillMediaResponse(candidates.size(), queuedCount);
+    }
 
     private record TimelineCursor(Instant date, Instant createdAt) {
     }

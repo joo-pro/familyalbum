@@ -1,9 +1,11 @@
 package com.joopapa.familyalbum.media;
 
+import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import jakarta.validation.Valid;
 import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.http.HttpHeaders;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -17,7 +19,10 @@ import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.multipart.MultipartFile;
 import org.springframework.web.servlet.mvc.method.annotation.StreamingResponseBody;
 import org.springframework.web.servlet.view.RedirectView;
+import org.springframework.web.server.ResponseStatusException;
+import org.springframework.util.StringUtils;
 
+import java.net.InetAddress;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
@@ -113,6 +118,15 @@ public class MediaController {
                 });
     }
 
+
+    @PostMapping("/admin/media/backfill-web-assets")
+    MediaDtos.BackfillMediaResponse backfillWebAssets(
+            HttpServletRequest request,
+            @RequestParam(value = "limit", defaultValue = "100") int limit
+    ) {
+        verifyLocalAdminRequest(request);
+        return mediaService.enqueueMissingWebAssets(limit);
+    }
     @DeleteMapping("/media/{assetId}")
     MediaDtos.DeleteMediaResponse deleteMedia(@PathVariable UUID assetId) {
         return mediaService.deleteAsset(assetId);
@@ -121,6 +135,21 @@ public class MediaController {
     @PostMapping("/media/delete")
     MediaDtos.DeleteMediaResponse deleteMediaBatch(@Valid @RequestBody MediaDtos.BatchMediaRequest request) {
         return mediaService.deleteAssets(request.assetIds());
+    }
+    private static void verifyLocalAdminRequest(HttpServletRequest request) {
+        if (StringUtils.hasText(request.getHeader("X-Forwarded-For")) || StringUtils.hasText(request.getHeader("X-Real-IP"))) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND);
+        }
+        try {
+            InetAddress remoteAddress = InetAddress.getByName(request.getRemoteAddr());
+            if (!remoteAddress.isLoopbackAddress() && !remoteAddress.isSiteLocalAddress()) {
+                throw new ResponseStatusException(HttpStatus.NOT_FOUND);
+            }
+        } catch (IllegalArgumentException exception) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND);
+        } catch (java.net.UnknownHostException exception) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND);
+        }
     }
 
     private static HttpHeaders cacheHeaders(MediaService.CachedMediaObject mediaObject) {
