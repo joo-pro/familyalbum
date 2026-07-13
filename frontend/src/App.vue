@@ -645,24 +645,43 @@ function formatBytes(bytes) {
 <template>
   <main class="app-shell">
     <section class="hero-section">
+      <div class="hero-sky" aria-hidden="true">
+        <span></span>
+        <span></span>
+        <span></span>
+      </div>
       <div class="hero-grid">
         <div class="hero-copy">
           <div class="hero-brand">
-            <img class="hero-icon" :src="appIconUrl" alt="" aria-hidden="true" />
-            <div>
+            <div class="hero-icon-frame">
+              <img class="hero-icon" :src="appIconUrl" alt="" aria-hidden="true" />
+            </div>
+            <div class="hero-title-block">
               <span class="hero-kicker">Family Album</span>
               <h1>{{ appConfig.appTitle }}</h1>
+              <div class="hero-title-lines" aria-hidden="true">
+                <span></span>
+                <span></span>
+                <span></span>
+              </div>
             </div>
           </div>
         </div>
-        <div class="hero-keepsake" aria-hidden="true">
-          <span></span>
-          <span></span>
-          <span></span>
+        <div class="hero-memory-board" aria-hidden="true">
+          <div class="memory-card memory-card-main">
+            <span class="memory-tape"></span>
+            <img :src="appIconUrl" alt="" />
+          </div>
+          <div class="memory-card memory-card-soft"></div>
+          <div class="memory-card memory-card-note">
+            <span></span>
+            <span></span>
+          </div>
+          <div class="memory-sticker memory-sticker-star">✦</div>
+          <div class="memory-sticker memory-sticker-heart">♡</div>
         </div>
       </div>
-    </section>
-    <input ref="fileInput" class="hidden-file-input" type="file" multiple accept="image/*,video/*,.heic,.heif,.heics,.heifs,.mov,.m4v,image/heic,image/heif,video/quicktime" @change="onFileChange" />
+    </section>    <input ref="fileInput" class="hidden-file-input" type="file" multiple accept="image/*,video/*,.heic,.heif,.heics,.heifs,.mov,.m4v,image/heic,image/heif,video/quicktime" @change="onFileChange" />
 
     <section v-if="selectedFiles.length || uploadMessage" class="upload-summary" aria-live="polite">
       <div class="upload-summary-main">
