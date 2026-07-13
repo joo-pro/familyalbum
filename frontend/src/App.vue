@@ -32,6 +32,7 @@ let thumbnailObserver
 const totalSize = computed(() => selectedFiles.value.reduce((sum, file) => sum + file.size, 0))
 const selectedCount = computed(() => selectedAssetIds.value.size)
 const selectedAssetIdList = computed(() => Array.from(selectedAssetIds.value))
+const eagerThumbnailIds = computed(() => new Set(assets.value.slice(0, 30).map((asset) => asset.id)))
 const activeIndex = computed(() => assets.value.findIndex((asset) => asset.id === activeAsset.value?.id))
 const hasPreviousAsset = computed(() => activeIndex.value > 0)
 const hasNextAsset = computed(() => activeIndex.value >= 0 && activeIndex.value < assets.value.length - 1)
@@ -168,7 +169,15 @@ const vLazyThumbnail = {
 }
 
 function isThumbnailVisible(assetId) {
-  return visibleThumbnailIds.value.has(assetId)
+  return eagerThumbnailIds.value.has(assetId) || visibleThumbnailIds.value.has(assetId)
+}
+
+function thumbnailLoadingMode(assetId) {
+  return eagerThumbnailIds.value.has(assetId) ? 'eager' : 'lazy'
+}
+
+function thumbnailFetchPriority(assetId) {
+  return eagerThumbnailIds.value.has(assetId) ? 'high' : 'auto'
 }
 function openFilePicker() {
   fileInput.value?.click()
@@ -520,7 +529,7 @@ function formatBytes(bytes) {
               @click="handleAssetClick(asset)"
             >
               <div class="asset-thumb" v-lazy-thumbnail="asset.id">
-                <img v-if="isThumbnailVisible(asset.id)" :src="mediaThumbnailUrl(asset)" :alt="asset.filename" loading="lazy" decoding="async" />
+                <img v-if="isThumbnailVisible(asset.id)" :src="mediaThumbnailUrl(asset)" :alt="asset.filename" :loading="thumbnailLoadingMode(asset.id)" :fetchpriority="thumbnailFetchPriority(asset.id)" decoding="async" />
                 <div v-else class="asset-thumb-placeholder" aria-hidden="true"></div>
                 <span v-if="asset.mediaType === 'VIDEO'" class="video-badge" aria-hidden="true">▶</span>
                 <span v-if="isSelectionMode" class="select-badge" :class="{ 'is-on': isSelected(asset.id) }" aria-hidden="true">

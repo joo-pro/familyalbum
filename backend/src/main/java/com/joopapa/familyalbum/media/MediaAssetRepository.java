@@ -46,12 +46,16 @@ public interface MediaAssetRepository extends JpaRepository<MediaAsset, UUID> {
                     (asset.mediaType = :videoType
                         and (asset.thumbnailObjectKey is null or asset.thumbnailObjectKey = '' or asset.previewObjectKey is null or asset.previewObjectKey = ''))
                     or (asset.mediaType = :imageType
-                        and (lower(asset.contentType) in ('image/heic', 'image/heif', 'image/heic-sequence', 'image/heif-sequence')
-                            or lower(asset.originalFilename) like '%.heic'
-                            or lower(asset.originalFilename) like '%.heif'
-                            or lower(asset.originalFilename) like '%.heics'
-                            or lower(asset.originalFilename) like '%.heifs')
-                        and (asset.thumbnailObjectKey is null or asset.thumbnailObjectKey = '' or asset.previewObjectKey is null or asset.previewObjectKey = ''))
+                        and (
+                            asset.thumbnailObjectKey is null
+                            or asset.thumbnailObjectKey = ''
+                            or ((lower(asset.contentType) in ('image/heic', 'image/heif', 'image/heic-sequence', 'image/heif-sequence')
+                                or lower(asset.originalFilename) like '%.heic'
+                                or lower(asset.originalFilename) like '%.heif'
+                                or lower(asset.originalFilename) like '%.heics'
+                                or lower(asset.originalFilename) like '%.heifs')
+                                and (asset.previewObjectKey is null or asset.previewObjectKey = ''))
+                        ))
                 )
             order by asset.createdAt asc
             """)

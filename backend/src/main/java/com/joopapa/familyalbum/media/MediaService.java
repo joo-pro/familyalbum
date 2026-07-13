@@ -518,7 +518,7 @@ public class MediaService {
         if (asset.getMediaType() == MediaType.VIDEO) {
             return !asset.hasPreview() || !asset.hasThumbnail();
         }
-        return isHeifImage(asset) && (!asset.hasPreview() || !asset.hasThumbnail());
+        return !asset.hasThumbnail() || (isHeifImage(asset) && !asset.hasPreview());
     }
 
     private boolean needsPreviewGeneration(MediaAsset asset) {
@@ -536,8 +536,8 @@ public class MediaService {
         }
         if (isHeifImage(asset)) {
             generateImagePreviewIfNeeded(asset, originalFile);
-            generateImageThumbnailIfNeeded(asset, originalFile);
         }
+        generateImageThumbnailIfNeeded(asset, originalFile);
     }
 
     private void generateImagePreviewIfNeeded(MediaAsset asset, Path originalFile) {
@@ -587,14 +587,14 @@ public class MediaService {
                     thumbnailFile.toString()
             ));
             if (exitCode != 0 || Files.size(thumbnailFile) == 0) {
-                log.warn("HEIF image thumbnail generation failed for asset {} with exit code {}", asset.getId(), exitCode);
+                log.warn("Image thumbnail generation failed for asset {} with exit code {}", asset.getId(), exitCode);
                 return;
             }
             String thumbnailObjectKey = createThumbnailObjectKey();
             uploadGeneratedObject(thumbnailObjectKey, "image/jpeg", thumbnailFile);
             asset.setThumbnailObjectKey(thumbnailObjectKey);
         } catch (IOException exception) {
-            log.warn("Failed to generate HEIF image thumbnail for {}", asset.getId(), exception);
+            log.warn("Failed to generate image thumbnail for {}", asset.getId(), exception);
         } finally {
             deleteTempFile(thumbnailFile);
         }
