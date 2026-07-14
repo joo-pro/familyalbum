@@ -38,7 +38,7 @@ public class SecurityConfig {
                                 "/manifest.webmanifest",
                                 "/sw.js"
                         ).permitAll()
-                        .requestMatchers(HttpMethod.POST, "/api/media/upload", "/api/media/upload-url", "/api/media/upload-complete").hasAnyRole("MOTHER", "FATHER")
+                        .requestMatchers(HttpMethod.POST, "/api/media/upload", "/api/media/upload-url", "/api/media/upload-complete", "/api/media/visibility").hasAnyRole("MOTHER", "FATHER")
                         .requestMatchers(HttpMethod.DELETE, "/api/media/**").hasAnyRole("MOTHER", "FATHER")
                         .requestMatchers(HttpMethod.POST, "/api/media/delete").hasAnyRole("MOTHER", "FATHER")
                         .requestMatchers("/api/admin/**").hasAnyRole("MOTHER", "FATHER")

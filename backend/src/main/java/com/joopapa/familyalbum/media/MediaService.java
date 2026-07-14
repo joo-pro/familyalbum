@@ -430,6 +430,17 @@ public class MediaService {
         return new MediaDtos.DeleteMediaResponse(assets.size());
     }
 
+
+    @Transactional
+    public MediaDtos.UpdateVisibilityResponse updateVisibility(List<UUID> assetIds, MediaVisibility visibility, FamilyUser actor) {
+        requireParent(actor);
+        List<MediaAsset> assets = findAssets(assetIds);
+        MediaVisibility normalizedVisibility = normalizeVisibility(visibility);
+        for (MediaAsset asset : assets) {
+            asset.changeVisibility(normalizedVisibility);
+        }
+        return new MediaDtos.UpdateVisibilityResponse(assets.size());
+    }
     @Transactional(readOnly = true)
     public void writeDownloadZip(List<UUID> assetIds, FamilyUser viewer, OutputStream outputStream) throws IOException {
         List<MediaAsset> assets = findVisibleAssets(assetIds, viewer);

@@ -170,6 +170,11 @@ public class MediaAsset {
         this.updatedAt = Instant.now();
     }
 
+    public void changeVisibility(MediaVisibility visibility) {
+        this.visibility = visibility == null ? MediaVisibility.FAMILY : visibility;
+        this.updatedAt = Instant.now();
+    }
+
     public void setContentHash(String contentHash) {
         this.contentHash = contentHash;
         this.updatedAt = Instant.now();

@@ -513,6 +513,20 @@ function lockBackground() {
 function unlockBackground() {
   document.body.style.overflow = previousBodyOverflow
 }
+function handleDetailPanelClick(event) {
+  if (!isDetailInfoOpen.value && !isDetailMenuOpen.value) return
+  if (event.target.closest('.detail-info') || event.target.closest('.detail-quick-actions')) return
+  isDetailInfoOpen.value = false
+  isDetailMenuOpen.value = false
+}
+function handleDetailBackdropClick() {
+  if (isDetailInfoOpen.value || isDetailMenuOpen.value) {
+    isDetailInfoOpen.value = false
+    isDetailMenuOpen.value = false
+    return
+  }
+  closeAsset()
+}
 function toggleDetailInfo() {
   isDetailInfoOpen.value = !isDetailInfoOpen.value
   isDetailMenuOpen.value = false
@@ -673,6 +687,21 @@ async function deleteAsset(asset) {
   await loadAssets()
 }
 
+async function updateSelectedVisibility(visibility) {
+  if (!canManageMedia.value || selectedCount.value === 0) return
+  isActionMenuOpen.value = false
+  const response = await fetch('/api/media/visibility', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ assetIds: selectedAssetIdList.value, visibility }),
+  })
+  if (!response.ok) throw new Error('공개 범위를 변경하지 못했어요.')
+  const label = visibilityLabel(visibility)
+  clearSelection()
+  isSelectionMode.value = false
+  await loadAssets()
+  showToast(`${label}로 변경했어요.`)
+}
 async function deleteSelectedAssets() {
   if (selectedCount.value === 0) return
   if (!confirm(`선택한 ${selectedCount.value}개 파일을 삭제할까요?`)) return
@@ -851,6 +880,8 @@ function formatBytes(bytes) {
         <div class="selection-actions">
           <button type="button" @click="toggleSelectionMode">선택 취소</button>
           <button type="button" :disabled="selectedCount === 0" @click="downloadSelectedAssets">{{ downloadActionLabel }}</button>
+          <button v-if="canManageMedia" type="button" :disabled="selectedCount === 0" @click="updateSelectedVisibility('FAMILY')">가족 공개</button>
+          <button v-if="canManageMedia" type="button" :disabled="selectedCount === 0" @click="updateSelectedVisibility('PARENTS')">부모만 공개</button>
           <button v-if="canManageMedia" type="button" :disabled="selectedCount === 0" class="danger-button" @click="deleteSelectedAssets">삭제</button>
         </div>
       </div>
@@ -934,8 +965,8 @@ function formatBytes(bytes) {
       </button>
     </div>
 
-    <div v-if="canAccessAlbum && activeAsset" class="detail-backdrop" @click.self="closeAsset" @wheel.prevent @touchmove.self.prevent>
-      <article class="detail-panel" role="dialog" aria-modal="true" aria-labelledby="asset-detail-title">
+    <div v-if="canAccessAlbum && activeAsset" class="detail-backdrop" @click.self="handleDetailBackdropClick" @wheel.prevent @touchmove.self.prevent>
+      <article class="detail-panel" role="dialog" aria-modal="true" aria-labelledby="asset-detail-title" @click="handleDetailPanelClick">
         <button class="detail-close" type="button" aria-label="닫기" @click="closeAsset">×</button>
         <button class="detail-nav detail-prev" type="button" :disabled="!hasPreviousAsset" aria-label="이전 사진" @click="showPreviousAsset">‹</button>
         <button class="detail-nav detail-next" type="button" :disabled="!hasNextAsset" aria-label="다음 사진" @click="showNextAsset">›</button>

@@ -152,6 +152,14 @@ public class MediaController {
         return mediaService.deleteAsset(assetId, currentUser(authentication));
     }
 
+
+    @PostMapping("/media/visibility")
+    MediaDtos.UpdateVisibilityResponse updateVisibility(
+            @Valid @RequestBody MediaDtos.UpdateVisibilityRequest request,
+            Authentication authentication
+    ) {
+        return mediaService.updateVisibility(request.assetIds(), request.visibility(), currentUser(authentication));
+    }
     @PostMapping("/media/delete")
     MediaDtos.DeleteMediaResponse deleteMediaBatch(
             @Valid @RequestBody MediaDtos.BatchMediaRequest request,

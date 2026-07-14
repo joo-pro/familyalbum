@@ -42,6 +42,15 @@ public final class MediaDtos {
     public record DeleteMediaResponse(int deletedCount) {
     }
 
+    public record UpdateVisibilityRequest(
+            @NotNull List<@NotNull UUID> assetIds,
+            @NotNull MediaVisibility visibility
+    ) {
+    }
+
+    public record UpdateVisibilityResponse(int updatedCount) {
+    }
+
     public record BackfillMediaResponse(
             int candidateCount,
             int queuedCount,
