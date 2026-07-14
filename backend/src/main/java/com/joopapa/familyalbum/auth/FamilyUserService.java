@@ -21,10 +21,20 @@ public class FamilyUserService {
         if (authentication == null || !authentication.isAuthenticated() || !(authentication.getPrincipal() instanceof OAuth2User oauthUser)) {
             return AuthDtos.MeResponse.anonymous();
         }
-        String kakaoId = String.valueOf(oauthUser.getAttribute("kakaoId"));
+        String kakaoId = firstText(oauthUser.getAttribute("kakaoId"), oauthUser.getAttribute("id"));
+        if (kakaoId == null) {
+            return AuthDtos.MeResponse.anonymous();
+        }
         return familyUserRepository.findByKakaoId(kakaoId)
                 .map(AuthDtos.MeResponse::from)
                 .orElseGet(AuthDtos.MeResponse::anonymous);
+    }
+    private static String firstText(Object first, Object second) {
+        if (first instanceof String text && !text.isBlank()) return text;
+        if (second instanceof String text && !text.isBlank()) return text;
+        if (first instanceof Number number) return String.valueOf(number);
+        if (second instanceof Number number) return String.valueOf(number);
+        return null;
     }
 
     @Transactional(readOnly = true)

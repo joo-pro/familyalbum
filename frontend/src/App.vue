@@ -128,7 +128,7 @@ async function loadAppConfig() {
 async function loadSession() {
   session.value = { ...session.value, loading: true }
   try {
-    const response = await fetch('/api/auth/me', { cache: 'no-store' })
+    const response = await fetch('/api/auth/me', { cache: 'no-store', credentials: 'same-origin' })
     if (!response.ok) throw new Error('AUTH_SESSION_' + response.status)
     session.value = { loading: false, ...await response.json() }
   } catch {
@@ -140,13 +140,18 @@ function loginWithKakao() {
   window.location.href = '/oauth2/authorization/kakao'
 }
 
-async function logout() {
-  await fetch('/api/auth/logout', { method: 'POST' })
+async function resetLoginState() {
+  await logout({ silent: true })
+  window.location.href = '/oauth2/authorization/kakao'
+}
+
+async function logout(options = {}) {
+  await fetch('/api/auth/logout', { method: 'POST', credentials: 'same-origin' })
   session.value = { loading: false, authenticated: false, approved: false, admin: false, user: null }
   assets.value = []
   activeAsset.value = null
   isAdminPanelOpen.value = false
-  showToast('로그아웃했어요.')
+  if (!options.silent) showToast('로그아웃했어요.')
 }
 
 async function openAdminPanel() {
@@ -782,6 +787,7 @@ function formatBytes(bytes) {
         <p>카카오톡으로 로그인한 뒤 관리자의 승인을 받으면 사진과 동영상을 볼 수 있어요.</p>
       </div>
       <button class="kakao-login-button" type="button" @click="loginWithKakao">카카오톡으로 로그인</button>
+      <button class="secondary-action" type="button" @click="resetLoginState">로그인 상태 초기화</button>
     </section>
 
     <section v-else-if="!session.approved" class="auth-card">
