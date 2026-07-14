@@ -38,6 +38,33 @@ public interface MediaAssetRepository extends JpaRepository<MediaAsset, UUID> {
             @Param("cursorCreatedAt") Instant cursorCreatedAt,
             Pageable pageable
     );
+
+    @Query("""
+            select asset
+            from MediaAsset asset
+            where asset.visibility = :visibility
+            order by coalesce(asset.capturedAt, asset.createdAt) desc, asset.createdAt desc
+            """)
+    List<MediaAsset> findTimelinePageByVisibility(
+            @Param("visibility") MediaVisibility visibility,
+            Pageable pageable
+    );
+
+    @Query("""
+            select asset
+            from MediaAsset asset
+            where asset.visibility = :visibility
+                and (coalesce(asset.capturedAt, asset.createdAt) < :cursorDate
+                    or (coalesce(asset.capturedAt, asset.createdAt) = :cursorDate and asset.createdAt < :cursorCreatedAt))
+            order by coalesce(asset.capturedAt, asset.createdAt) desc, asset.createdAt desc
+            """)
+    List<MediaAsset> findTimelinePageByVisibilityAfter(
+            @Param("visibility") MediaVisibility visibility,
+            @Param("cursorDate") Instant cursorDate,
+            @Param("cursorCreatedAt") Instant cursorCreatedAt,
+            Pageable pageable
+    );
+
     @Query("""
             select asset
             from MediaAsset asset

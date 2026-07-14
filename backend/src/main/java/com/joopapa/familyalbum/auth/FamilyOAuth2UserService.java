@@ -36,8 +36,8 @@ public class FamilyOAuth2UserService implements OAuth2UserService<OAuth2UserRequ
         FamilyUser user = familyUserRepository.findByKakaoId(kakaoId)
                 .orElseGet(() -> new FamilyUser(kakaoId, profile.nickname(), profile.profileImageUrl()));
         user.refreshProfile(profile.nickname(), profile.profileImageUrl());
-        if (authProperties.isBootstrapAdmin(kakaoId) && user.getRole() != FamilyUserRole.ADMIN) {
-            user.grantRole(FamilyUserRole.ADMIN);
+        if (authProperties.isBootstrapAdmin(kakaoId) && user.getRole() != FamilyUserRole.FATHER) {
+            user.grantRole(FamilyUserRole.FATHER);
         }
         familyUserRepository.save(user);
 

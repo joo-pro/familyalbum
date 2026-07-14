@@ -1,5 +1,7 @@
 package com.joopapa.familyalbum.media;
 
+import com.joopapa.familyalbum.auth.FamilyUser;
+
 import com.joopapa.familyalbum.push.FamilyPushNotificationService;
 import com.joopapa.familyalbum.storage.StorageProperties;
 import org.slf4j.Logger;
@@ -83,17 +85,27 @@ public class MediaService {
                 .toList();
     }
     @Transactional(readOnly = true)
-    public MediaDtos.MediaPageResponse listAssetsPage(String cursor, int limit) {
+    public MediaDtos.MediaPageResponse listAssetsPage(String cursor, int limit, FamilyUser viewer) {
         int pageSize = Math.clamp(limit, 1, 80);
         TimelineCursor timelineCursor = decodeCursor(cursor);
         PageRequest pageRequest = PageRequest.of(0, pageSize + 1);
+        boolean parentViewer = viewer.getRole().isParent();
         List<MediaAsset> page = timelineCursor.date() == null
-                ? mediaAssetRepository.findTimelinePage(pageRequest)
-                : mediaAssetRepository.findTimelinePageAfter(
-                        timelineCursor.date(),
-                        timelineCursor.createdAt(),
-                        pageRequest
-                );
+                ? (parentViewer
+                        ? mediaAssetRepository.findTimelinePage(pageRequest)
+                        : mediaAssetRepository.findTimelinePageByVisibility(MediaVisibility.FAMILY, pageRequest))
+                : (parentViewer
+                        ? mediaAssetRepository.findTimelinePageAfter(
+                                timelineCursor.date(),
+                                timelineCursor.createdAt(),
+                                pageRequest
+                        )
+                        : mediaAssetRepository.findTimelinePageByVisibilityAfter(
+                                MediaVisibility.FAMILY,
+                                timelineCursor.date(),
+                                timelineCursor.createdAt(),
+                                pageRequest
+                        ));
         boolean hasMore = page.size() > pageSize;
         List<MediaAsset> visiblePage = hasMore ? page.subList(0, pageSize) : page;
         String nextCursor = hasMore && !visiblePage.isEmpty()
@@ -170,7 +182,8 @@ public class MediaService {
     }
 
     @Transactional
-    public MediaDtos.MediaAssetResponse uploadFile(MultipartFile file, Instant capturedAt) {
+    public MediaDtos.MediaAssetResponse uploadFile(MultipartFile file, Instant capturedAt, MediaVisibility visibility, FamilyUser uploader) {
+        requireParent(uploader);
         String filename = cleanFilename(file.getOriginalFilename());
         String contentType = normalizeContentType(file.getContentType(), filename);
         MediaType mediaType = detectMediaType(contentType);
@@ -195,7 +208,9 @@ public class MediaService {
                     contentType,
                     mediaType,
                     file.getSize(),
-                    capturedAt
+                    capturedAt,
+                    normalizeVisibility(visibility),
+                    uploader.getRole()
             ));
             asset.setContentHash(contentHash);
 
@@ -227,7 +242,8 @@ public class MediaService {
     }
 
     @Transactional
-    public MediaDtos.CreateUploadUrlResponse createUploadUrl(MediaDtos.CreateUploadUrlRequest request) {
+    public MediaDtos.CreateUploadUrlResponse createUploadUrl(MediaDtos.CreateUploadUrlRequest request, FamilyUser uploader) {
+        requireParent(uploader);
         String contentType = normalizeContentType(request.contentType(), request.filename());
         MediaType mediaType = detectMediaType(contentType);
         String objectKey = createOriginalObjectKey(request.filename());
@@ -237,7 +253,9 @@ public class MediaService {
                 contentType,
                 mediaType,
                 request.byteSize(),
-                request.capturedAt()
+                request.capturedAt(),
+                normalizeVisibility(request.visibility()),
+                uploader.getRole()
         ));
 
         PutObjectRequest putObjectRequest = PutObjectRequest.builder()
@@ -260,7 +278,8 @@ public class MediaService {
     }
 
     @Transactional
-    public MediaDtos.MediaAssetResponse completeUpload(UUID assetId) {
+    public MediaDtos.MediaAssetResponse completeUpload(UUID assetId, FamilyUser uploader) {
+        requireParent(uploader);
         MediaAsset asset = mediaAssetRepository.findById(assetId)
                 .orElseThrow(() -> new IllegalArgumentException("Media asset not found"));
         verifyUploadedObject(asset);
@@ -276,8 +295,13 @@ public class MediaService {
     }
 
     @Transactional(readOnly = true)
-    public MediaDtos.DownloadUrlResponse createDownloadUrl(UUID assetId) {
-        MediaAsset asset = getAsset(assetId);
+    public MediaAsset getVisibleAssetForDownload(UUID assetId, FamilyUser viewer) {
+        return getVisibleAsset(assetId, viewer);
+    }
+
+    @Transactional(readOnly = true)
+    public MediaDtos.DownloadUrlResponse createDownloadUrl(UUID assetId, FamilyUser viewer) {
+        MediaAsset asset = getVisibleAsset(assetId, viewer);
         GetObjectRequest getObjectRequest = GetObjectRequest.builder()
                 .bucket(storageProperties.bucket())
                 .key(asset.getOriginalObjectKey())
@@ -295,8 +319,8 @@ public class MediaService {
     }
 
     @Transactional(readOnly = true)
-    public String createViewUrl(UUID assetId) {
-        MediaAsset asset = getAsset(assetId);
+    public String createViewUrl(UUID assetId, FamilyUser viewer) {
+        MediaAsset asset = getVisibleAsset(assetId, viewer);
         if (asset.hasPreview()) {
             return createInlineUrl(asset.getPreviewObjectKey(), asset.getPreviewContentType(), previewFilename(asset));
         }
@@ -318,7 +342,7 @@ public class MediaService {
     }
 
     @Transactional
-    public CachedMediaObject getThumbnailObject(UUID assetId) {
+    public CachedMediaObject getThumbnailObject(UUID assetId, FamilyUser viewer) {
         MediaAsset asset = getAsset(assetId);
         boolean settled = !needsWebAssetGeneration(asset);
         if (!settled) {
@@ -372,8 +396,8 @@ public class MediaService {
     }
 
     @Transactional(readOnly = true)
-    public void writeOriginalFile(UUID assetId, OutputStream outputStream) throws IOException {
-        MediaAsset asset = getAsset(assetId);
+    public void writeOriginalFile(UUID assetId, FamilyUser viewer, OutputStream outputStream) throws IOException {
+        MediaAsset asset = getVisibleAsset(assetId, viewer);
         writeObject(asset.getOriginalObjectKey(), outputStream);
     }
 
@@ -387,7 +411,8 @@ public class MediaService {
     }
 
     @Transactional
-    public MediaDtos.DeleteMediaResponse deleteAsset(UUID assetId) {
+    public MediaDtos.DeleteMediaResponse deleteAsset(UUID assetId, FamilyUser actor) {
+        requireParent(actor);
         MediaAsset asset = getAsset(assetId);
         deleteObjects(asset);
         mediaAssetRepository.delete(asset);
@@ -395,7 +420,8 @@ public class MediaService {
     }
 
     @Transactional
-    public MediaDtos.DeleteMediaResponse deleteAssets(List<UUID> assetIds) {
+    public MediaDtos.DeleteMediaResponse deleteAssets(List<UUID> assetIds, FamilyUser actor) {
+        requireParent(actor);
         List<MediaAsset> assets = findAssets(assetIds);
         for (MediaAsset asset : assets) {
             deleteObjects(asset);
@@ -405,8 +431,8 @@ public class MediaService {
     }
 
     @Transactional(readOnly = true)
-    public void writeDownloadZip(List<UUID> assetIds, OutputStream outputStream) throws IOException {
-        List<MediaAsset> assets = findAssets(assetIds);
+    public void writeDownloadZip(List<UUID> assetIds, FamilyUser viewer, OutputStream outputStream) throws IOException {
+        List<MediaAsset> assets = findVisibleAssets(assetIds, viewer);
         Set<String> usedNames = new HashSet<>();
         try (ZipOutputStream zipOutputStream = new ZipOutputStream(outputStream)) {
             for (MediaAsset asset : assets) {
@@ -423,6 +449,36 @@ public class MediaService {
         }
     }
 
+
+    private MediaAsset getVisibleAsset(UUID assetId, FamilyUser viewer) {
+        MediaAsset asset = getAsset(assetId);
+        if (!canView(asset, viewer)) {
+            throw new IllegalArgumentException("Media asset not found");
+        }
+        return asset;
+    }
+
+    private List<MediaAsset> findVisibleAssets(List<UUID> assetIds, FamilyUser viewer) {
+        List<MediaAsset> assets = findAssets(assetIds);
+        if (assets.stream().anyMatch(asset -> !canView(asset, viewer))) {
+            throw new IllegalArgumentException("Some media assets were not found");
+        }
+        return assets;
+    }
+
+    private static boolean canView(MediaAsset asset, FamilyUser viewer) {
+        return viewer.getRole().isParent() || asset.getVisibility() == MediaVisibility.FAMILY;
+    }
+
+    private static void requireParent(FamilyUser user) {
+        if (user == null || !user.getRole().isParent()) {
+            throw new IllegalArgumentException("Parent role is required");
+        }
+    }
+
+    private static MediaVisibility normalizeVisibility(MediaVisibility visibility) {
+        return visibility == null ? MediaVisibility.FAMILY : visibility;
+    }
     private String createInlineUrl(String objectKey, String contentType, String filename) {
         Duration ttl = storageProperties.inlineUrlTtl();
         return createInlineUrl(objectKey, contentType, filename, ttl, privateCacheControl(ttl, true));

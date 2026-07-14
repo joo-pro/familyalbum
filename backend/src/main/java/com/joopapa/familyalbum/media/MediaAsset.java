@@ -1,5 +1,7 @@
 package com.joopapa.familyalbum.media;
 
+import com.joopapa.familyalbum.auth.FamilyUserRole;
+
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;
@@ -51,6 +53,14 @@ public class MediaAsset {
     @Column(nullable = false)
     private UploadStatus uploadStatus;
 
+    @Enumerated(EnumType.STRING)
+    @Column(nullable = false, length = 32)
+    private MediaVisibility visibility = MediaVisibility.FAMILY;
+
+    @Enumerated(EnumType.STRING)
+    @Column(length = 32)
+    private FamilyUserRole uploadedByRole;
+
     private Instant capturedAt;
 
     @Column(nullable = false)
@@ -62,7 +72,7 @@ public class MediaAsset {
     protected MediaAsset() {
     }
 
-    public MediaAsset(String originalObjectKey, String originalFilename, String contentType, MediaType mediaType, long byteSize, Instant capturedAt) {
+    public MediaAsset(String originalObjectKey, String originalFilename, String contentType, MediaType mediaType, long byteSize, Instant capturedAt, MediaVisibility visibility, FamilyUserRole uploadedByRole) {
         Instant now = Instant.now();
         this.originalObjectKey = originalObjectKey;
         this.originalFilename = originalFilename;
@@ -70,6 +80,8 @@ public class MediaAsset {
         this.mediaType = mediaType;
         this.byteSize = byteSize;
         this.capturedAt = capturedAt;
+        this.visibility = visibility == null ? MediaVisibility.FAMILY : visibility;
+        this.uploadedByRole = uploadedByRole;
         this.uploadStatus = UploadStatus.PENDING;
         this.createdAt = now;
         this.updatedAt = now;
@@ -117,6 +129,14 @@ public class MediaAsset {
 
     public UploadStatus getUploadStatus() {
         return uploadStatus;
+    }
+
+    public MediaVisibility getVisibility() {
+        return visibility;
+    }
+
+    public FamilyUserRole getUploadedByRole() {
+        return uploadedByRole;
     }
 
     public Instant getCapturedAt() {

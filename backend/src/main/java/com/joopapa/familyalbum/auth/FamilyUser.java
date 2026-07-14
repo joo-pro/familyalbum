@@ -97,7 +97,7 @@ public class FamilyUser {
     }
 
     public boolean isApproved() {
-        return role == FamilyUserRole.VIEWER || role == FamilyUserRole.ADMIN;
+        return role.isApproved();
     }
 
     public void refreshProfile(String nickname, String profileImageUrl) {

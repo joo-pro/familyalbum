@@ -4,6 +4,7 @@ import com.joopapa.familyalbum.auth.FamilyOAuth2UserService;
 import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.http.HttpMethod;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.web.cors.CorsConfiguration;
@@ -37,8 +38,11 @@ public class SecurityConfig {
                                 "/manifest.webmanifest",
                                 "/sw.js"
                         ).permitAll()
-                        .requestMatchers("/api/admin/**").hasRole("ADMIN")
-                        .requestMatchers("/api/media/**", "/api/push/subscriptions").hasAnyRole("VIEWER", "ADMIN")
+                        .requestMatchers(HttpMethod.POST, "/api/media/upload", "/api/media/upload-url", "/api/media/upload-complete").hasAnyRole("MOTHER", "FATHER")
+                        .requestMatchers(HttpMethod.DELETE, "/api/media/**").hasAnyRole("MOTHER", "FATHER")
+                        .requestMatchers(HttpMethod.POST, "/api/media/delete").hasAnyRole("MOTHER", "FATHER")
+                        .requestMatchers("/api/admin/**").hasAnyRole("MOTHER", "FATHER")
+                        .requestMatchers("/api/media/**", "/api/push/subscriptions").hasAnyRole("MOTHER", "FATHER", "FAMILY")
                         .requestMatchers("/api/**").authenticated()
                         .anyRequest().permitAll()
                 )

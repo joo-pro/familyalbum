@@ -1,5 +1,6 @@
 package com.joopapa.familyalbum.media;
 
+import com.joopapa.familyalbum.auth.FamilyUserRole;
 import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
@@ -16,7 +17,8 @@ public final class MediaDtos {
             @NotBlank String filename,
             @NotBlank String contentType,
             @Min(1) long byteSize,
-            Instant capturedAt
+            Instant capturedAt,
+            MediaVisibility visibility
     ) {
     }
 
@@ -39,6 +41,7 @@ public final class MediaDtos {
 
     public record DeleteMediaResponse(int deletedCount) {
     }
+
     public record BackfillMediaResponse(
             int candidateCount,
             int queuedCount,
@@ -65,6 +68,8 @@ public final class MediaDtos {
             Instant capturedAt,
             Instant createdAt,
             boolean hasThumbnail,
+            MediaVisibility visibility,
+            FamilyUserRole uploadedByRole,
             boolean duplicate
     ) {
         static MediaAssetResponse from(MediaAsset asset) {
@@ -82,6 +87,8 @@ public final class MediaDtos {
                     asset.getCapturedAt(),
                     asset.getCreatedAt(),
                     asset.hasThumbnail(),
+                    asset.getVisibility(),
+                    asset.getUploadedByRole(),
                     duplicate
             );
         }

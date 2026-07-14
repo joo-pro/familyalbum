@@ -11,6 +11,7 @@ const assets = ref([])
 const selectedFiles = ref([])
 const isUploading = ref(false)
 const uploadMessage = ref('')
+const uploadVisibility = ref('FAMILY')
 const uploadProgress = ref(0)
 const uploadLoadedBytes = ref(0)
 const currentUploadIndex = ref(0)
@@ -47,6 +48,7 @@ const totalSize = computed(() => selectedFiles.value.reduce((sum, file) => sum +
 const currentUser = computed(() => session.value.user)
 const canAccessAlbum = computed(() => session.value.authenticated && session.value.approved)
 const isAdmin = computed(() => session.value.admin)
+const canManageMedia = computed(() => isAdmin.value)
 const uploadProgressPercent = computed(() => Math.min(100, Math.round(uploadProgress.value)))
 const uploadStatusText = computed(() => {
   if (!isUploading.value) return selectedFiles.value.length ? `${selectedFiles.value.length}개 선택됨` : '업로드 상태'
@@ -191,9 +193,22 @@ async function updateUserRole(user, role) {
 }
 
 function roleLabel(role) {
-  if (role === 'ADMIN') return '관리자'
-  if (role === 'VIEWER') return '가족'
+  if (role === 'MOTHER') return '엄마'
+  if (role === 'FATHER') return '아빠'
+  if (role === 'FAMILY') return '가족'
   return '승인 대기'
+}
+
+function visibilityLabel(visibility) {
+  if (visibility === 'PARENTS') return '부모 공개'
+  return '가족 공개'
+}
+
+function uploaderRoleLabel(role) {
+  if (role === 'MOTHER') return '엄마'
+  if (role === 'FATHER') return '아빠'
+  if (role === 'FAMILY') return '가족'
+  return '알 수 없음'
 }
 async function initializePushNotifications() {
   if (!canUseNotifications.value) {
@@ -446,6 +461,7 @@ function uploadFileWithProgress(file, onProgress) {
     const formData = new FormData()
     formData.append('file', file)
     formData.append('capturedAt', new Date(file.lastModified).toISOString())
+    formData.append('visibility', uploadVisibility.value)
 
     const request = new XMLHttpRequest()
     request.open('POST', '/api/media/upload')
@@ -803,13 +819,17 @@ function formatBytes(bytes) {
       </div>
       <button class="secondary-action" type="button" @click="logout">로그아웃</button>
     </section>
-    <input v-if="canAccessAlbum" ref="fileInput" class="hidden-file-input" type="file" multiple accept="image/*,video/*,.heic,.heif,.heics,.heifs,.mov,.m4v,image/heic,image/heif,video/quicktime" @change="onFileChange" />
+    <input v-if="canAccessAlbum && canManageMedia" ref="fileInput" class="hidden-file-input" type="file" multiple accept="image/*,video/*,.heic,.heif,.heics,.heifs,.mov,.m4v,image/heic,image/heif,video/quicktime" @change="onFileChange" />
 
-    <section v-if="canAccessAlbum && (selectedFiles.length || uploadMessage)" class="upload-summary" aria-live="polite">
+    <section v-if="canAccessAlbum && canManageMedia && (selectedFiles.length || uploadMessage)" class="upload-summary" aria-live="polite">
       <div class="upload-summary-main">
         <div>
           <strong>{{ uploadStatusText }}</strong>
           <span>{{ selectedFiles.length ? formatBytes(totalSize) : uploadMessage }}</span>
+        </div>
+        <div v-if="selectedFiles.length" class="upload-visibility" role="radiogroup" aria-label="공개 범위">
+          <button type="button" :class="{ active: uploadVisibility === 'FAMILY' }" @click="uploadVisibility = 'FAMILY'">가족 공개</button>
+          <button type="button" :class="{ active: uploadVisibility === 'PARENTS' }" @click="uploadVisibility = 'PARENTS'">부모만</button>
         </div>
         <button class="upload-inline-button" type="button" :disabled="!selectedFiles.length || isUploading" @click="uploadSelectedFiles">
           {{ uploadButtonLabel }}
@@ -831,7 +851,7 @@ function formatBytes(bytes) {
         <div class="selection-actions">
           <button type="button" @click="toggleSelectionMode">선택 취소</button>
           <button type="button" :disabled="selectedCount === 0" @click="downloadSelectedAssets">{{ downloadActionLabel }}</button>
-          <button type="button" :disabled="selectedCount === 0" class="danger-button" @click="deleteSelectedAssets">삭제</button>
+          <button v-if="canManageMedia" type="button" :disabled="selectedCount === 0" class="danger-button" @click="deleteSelectedAssets">삭제</button>
         </div>
       </div>
 
@@ -890,7 +910,7 @@ function formatBytes(bytes) {
 
     <div v-if="canAccessAlbum" class="floating-actions" :class="{ 'is-open': isActionMenuOpen }">
       <div v-if="isActionMenuOpen" class="floating-menu" role="menu">
-        <button type="button" role="menuitem" @click="openFilePicker">사진/동영상 선택</button>
+        <button v-if="canManageMedia" type="button" role="menuitem" @click="openFilePicker">사진/동영상 선택</button>
         <button type="button" role="menuitem" @click="toggleSelectionMode">
           {{ isSelectionMode ? '선택 취소' : '선택 모드' }}
         </button>
@@ -933,7 +953,7 @@ function formatBytes(bytes) {
         <div class="detail-quick-actions">
           <div v-if="isDetailMenuOpen" class="detail-menu" role="menu">
             <button type="button" role="menuitem" @click="toggleDetailInfo">상세</button>
-            <button type="button" role="menuitem" class="danger-button" @click="deleteAsset(activeAsset)">삭제</button>
+            <button v-if="canManageMedia" type="button" role="menuitem" class="danger-button" @click="deleteAsset(activeAsset)">삭제</button>
           </div>
           <button class="detail-save-trigger" type="button" :aria-label="downloadActionLabel" @click="downloadAsset(activeAsset)">&#8595;</button>
           <button class="detail-menu-trigger" type="button" :aria-expanded="isDetailMenuOpen" aria-label="상세 조작 메뉴" @click="isDetailMenuOpen = !isDetailMenuOpen">i</button>
@@ -954,6 +974,14 @@ function formatBytes(bytes) {
             <div>
               <dt>상태</dt>
               <dd>{{ activeAsset.uploadStatus }}</dd>
+            </div>
+            <div>
+              <dt>공개 범위</dt>
+              <dd>{{ visibilityLabel(activeAsset.visibility) }}</dd>
+            </div>
+            <div>
+              <dt>올린 사람</dt>
+              <dd>{{ uploaderRoleLabel(activeAsset.uploadedByRole) }}</dd>
             </div>
             <div>
               <dt>타입</dt>
@@ -983,8 +1011,9 @@ function formatBytes(bytes) {
               <span>{{ roleLabel(user.role) }} · {{ user.kakaoId }}</span>
             </div>
             <div class="admin-user-actions">
-              <button type="button" :disabled="user.role === 'VIEWER'" @click="updateUserRole(user, 'VIEWER')">가족 승인</button>
-              <button type="button" :disabled="user.role === 'ADMIN'" @click="updateUserRole(user, 'ADMIN')">관리자</button>
+              <button type="button" :disabled="user.role === 'FAMILY'" @click="updateUserRole(user, 'FAMILY')">가족</button>
+              <button type="button" :disabled="user.role === 'MOTHER'" @click="updateUserRole(user, 'MOTHER')">엄마</button>
+              <button type="button" :disabled="user.role === 'FATHER'" @click="updateUserRole(user, 'FATHER')">아빠</button>
               <button type="button" :disabled="user.role === 'PENDING'" class="danger-button" @click="updateUserRole(user, 'PENDING')">권한 회수</button>
             </div>
           </article>

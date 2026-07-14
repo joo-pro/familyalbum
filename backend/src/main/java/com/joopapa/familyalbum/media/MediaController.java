@@ -1,5 +1,7 @@
 package com.joopapa.familyalbum.media;
 
+import com.joopapa.familyalbum.auth.FamilyUser;
+import com.joopapa.familyalbum.auth.FamilyUserService;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import jakarta.validation.Valid;
@@ -7,6 +9,8 @@ import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.core.Authentication;
+import org.springframework.util.StringUtils;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -17,10 +21,9 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.multipart.MultipartFile;
+import org.springframework.web.server.ResponseStatusException;
 import org.springframework.web.servlet.mvc.method.annotation.StreamingResponseBody;
 import org.springframework.web.servlet.view.RedirectView;
-import org.springframework.web.server.ResponseStatusException;
-import org.springframework.util.StringUtils;
 
 import java.net.InetAddress;
 import java.net.URLEncoder;
@@ -34,9 +37,11 @@ import java.util.UUID;
 @RequestMapping("/api")
 public class MediaController {
     private final MediaService mediaService;
+    private final FamilyUserService familyUserService;
 
-    public MediaController(MediaService mediaService) {
+    public MediaController(MediaService mediaService, FamilyUserService familyUserService) {
         this.mediaService = mediaService;
+        this.familyUserService = familyUserService;
     }
 
     @GetMapping("/health")
@@ -47,52 +52,66 @@ public class MediaController {
     @GetMapping("/media")
     MediaDtos.MediaPageResponse listMedia(
             @RequestParam(value = "cursor", required = false) String cursor,
-            @RequestParam(value = "limit", defaultValue = "48") int limit
+            @RequestParam(value = "limit", defaultValue = "48") int limit,
+            Authentication authentication
     ) {
-        return mediaService.listAssetsPage(cursor, limit);
+        return mediaService.listAssetsPage(cursor, limit, currentUser(authentication));
     }
 
     @PostMapping("/media/upload")
     MediaDtos.MediaAssetResponse uploadMedia(
             @RequestParam("file") MultipartFile file,
-            @RequestParam(value = "capturedAt", required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) Instant capturedAt
+            @RequestParam(value = "capturedAt", required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) Instant capturedAt,
+            @RequestParam(value = "visibility", defaultValue = "FAMILY") MediaVisibility visibility,
+            Authentication authentication
     ) {
-        return mediaService.uploadFile(file, capturedAt);
+        return mediaService.uploadFile(file, capturedAt, visibility, currentUser(authentication));
     }
 
     @PostMapping("/media/upload-url")
-    MediaDtos.CreateUploadUrlResponse createUploadUrl(@Valid @RequestBody MediaDtos.CreateUploadUrlRequest request) {
-        return mediaService.createUploadUrl(request);
+    MediaDtos.CreateUploadUrlResponse createUploadUrl(
+            @Valid @RequestBody MediaDtos.CreateUploadUrlRequest request,
+            Authentication authentication
+    ) {
+        return mediaService.createUploadUrl(request, currentUser(authentication));
     }
 
     @PostMapping("/media/upload-complete")
-    MediaDtos.MediaAssetResponse completeUpload(@Valid @RequestBody MediaDtos.CompleteUploadRequest request) {
-        return mediaService.completeUpload(request.assetId());
+    MediaDtos.MediaAssetResponse completeUpload(
+            @Valid @RequestBody MediaDtos.CompleteUploadRequest request,
+            Authentication authentication
+    ) {
+        return mediaService.completeUpload(request.assetId(), currentUser(authentication));
     }
 
     @PostMapping("/media/{assetId}/download-url")
-    MediaDtos.DownloadUrlResponse createDownloadUrl(@PathVariable UUID assetId) {
-        return mediaService.createDownloadUrl(assetId);
+    MediaDtos.DownloadUrlResponse createDownloadUrl(@PathVariable UUID assetId, Authentication authentication) {
+        return mediaService.createDownloadUrl(assetId, currentUser(authentication));
     }
 
     @GetMapping("/media/{assetId}/file")
-    StreamingResponseBody downloadMediaFile(@PathVariable UUID assetId, HttpServletResponse response) {
-        MediaAsset asset = mediaService.getAsset(assetId);
+    StreamingResponseBody downloadMediaFile(@PathVariable UUID assetId, Authentication authentication, HttpServletResponse response) {
+        FamilyUser viewer = currentUser(authentication);
+        MediaAsset asset = mediaService.getVisibleAssetForDownload(assetId, viewer);
         response.setHeader(HttpHeaders.CONTENT_DISPOSITION, contentDisposition(asset.getOriginalFilename()));
         response.setContentType(asset.getContentType());
-        return outputStream -> mediaService.writeOriginalFile(assetId, outputStream);
+        return outputStream -> mediaService.writeOriginalFile(assetId, viewer, outputStream);
     }
 
     @PostMapping(value = "/media/download", produces = "application/zip")
-    StreamingResponseBody downloadMediaZip(@Valid @RequestBody MediaDtos.BatchMediaRequest request, HttpServletResponse response) {
+    StreamingResponseBody downloadMediaZip(
+            @Valid @RequestBody MediaDtos.BatchMediaRequest request,
+            Authentication authentication,
+            HttpServletResponse response
+    ) {
         response.setHeader(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"familyalbum-media.zip\"");
         response.setContentType("application/zip");
-        return outputStream -> mediaService.writeDownloadZip(request.assetIds(), outputStream);
+        return outputStream -> mediaService.writeDownloadZip(request.assetIds(), currentUser(authentication), outputStream);
     }
 
     @GetMapping("/media/{assetId}/view")
-    RedirectView viewMedia(@PathVariable UUID assetId) {
-        RedirectView redirectView = new RedirectView(mediaService.createViewUrl(assetId));
+    RedirectView viewMedia(@PathVariable UUID assetId, Authentication authentication) {
+        RedirectView redirectView = new RedirectView(mediaService.createViewUrl(assetId, currentUser(authentication)));
         redirectView.setExposeModelAttributes(false);
         return redirectView;
     }
@@ -100,9 +119,10 @@ public class MediaController {
     @GetMapping("/media/{assetId}/thumbnail")
     ResponseEntity<StreamingResponseBody> viewThumbnail(
             @PathVariable UUID assetId,
-            @RequestHeader(value = HttpHeaders.IF_NONE_MATCH, required = false) String ifNoneMatch
+            @RequestHeader(value = HttpHeaders.IF_NONE_MATCH, required = false) String ifNoneMatch,
+            Authentication authentication
     ) {
-        MediaService.CachedMediaObject thumbnail = mediaService.getThumbnailObject(assetId);
+        MediaService.CachedMediaObject thumbnail = mediaService.getThumbnailObject(assetId, currentUser(authentication));
         HttpHeaders headers = cacheHeaders(thumbnail);
         if (etagMatches(ifNoneMatch, thumbnail.eTag())) {
             return ResponseEntity.status(304).headers(headers).build();
@@ -118,7 +138,6 @@ public class MediaController {
                 });
     }
 
-
     @PostMapping("/admin/media/backfill-web-assets")
     MediaDtos.BackfillMediaResponse backfillWebAssets(
             HttpServletRequest request,
@@ -127,15 +146,24 @@ public class MediaController {
         verifyLocalAdminRequest(request);
         return mediaService.enqueueMissingWebAssets(limit);
     }
+
     @DeleteMapping("/media/{assetId}")
-    MediaDtos.DeleteMediaResponse deleteMedia(@PathVariable UUID assetId) {
-        return mediaService.deleteAsset(assetId);
+    MediaDtos.DeleteMediaResponse deleteMedia(@PathVariable UUID assetId, Authentication authentication) {
+        return mediaService.deleteAsset(assetId, currentUser(authentication));
     }
 
     @PostMapping("/media/delete")
-    MediaDtos.DeleteMediaResponse deleteMediaBatch(@Valid @RequestBody MediaDtos.BatchMediaRequest request) {
-        return mediaService.deleteAssets(request.assetIds());
+    MediaDtos.DeleteMediaResponse deleteMediaBatch(
+            @Valid @RequestBody MediaDtos.BatchMediaRequest request,
+            Authentication authentication
+    ) {
+        return mediaService.deleteAssets(request.assetIds(), currentUser(authentication));
     }
+
+    private FamilyUser currentUser(Authentication authentication) {
+        return familyUserService.requireCurrentUser(authentication);
+    }
+
     private static void verifyLocalAdminRequest(HttpServletRequest request) {
         if (StringUtils.hasText(request.getHeader("X-Forwarded-For")) || StringUtils.hasText(request.getHeader("X-Real-IP"))) {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND);

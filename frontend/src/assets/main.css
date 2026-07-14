@@ -428,6 +428,34 @@ h1 {
 }
 
 
+
+.upload-visibility {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 6px;
+  padding: 4px;
+  border: 1px solid rgba(145, 196, 230, 0.45);
+  border-radius: 14px;
+  background: #f4fbff;
+}
+
+.upload-visibility button {
+  min-height: 34px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  color: #4d7593;
+  font-size: 13px;
+  font-weight: 900;
+}
+
+.upload-visibility button.active {
+  background: #247ec0;
+  color: #ffffff;
+  box-shadow: 0 8px 18px rgba(36, 126, 192, 0.18);
+}
 .upload-inline-button {
   flex: 0 0 auto;
   min-height: 42px;
@@ -1187,7 +1215,35 @@ h1 {
   }
 
   .selection-actions button,
-  .upload-inline-button {
+
+.upload-visibility {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 6px;
+  padding: 4px;
+  border: 1px solid rgba(145, 196, 230, 0.45);
+  border-radius: 14px;
+  background: #f4fbff;
+}
+
+.upload-visibility button {
+  min-height: 34px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  color: #4d7593;
+  font-size: 13px;
+  font-weight: 900;
+}
+
+.upload-visibility button.active {
+  background: #247ec0;
+  color: #ffffff;
+  box-shadow: 0 8px 18px rgba(36, 126, 192, 0.18);
+}
+.upload-inline-button {
     width: 100%;
   }
 }

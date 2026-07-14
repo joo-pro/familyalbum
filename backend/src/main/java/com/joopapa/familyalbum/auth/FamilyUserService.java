@@ -29,6 +29,19 @@ public class FamilyUserService {
                 .map(AuthDtos.MeResponse::from)
                 .orElseGet(AuthDtos.MeResponse::anonymous);
     }
+
+    @Transactional(readOnly = true)
+    public FamilyUser requireCurrentUser(Authentication authentication) {
+        if (authentication == null || !authentication.isAuthenticated() || !(authentication.getPrincipal() instanceof OAuth2User oauthUser)) {
+            throw new IllegalArgumentException("Authenticated family user is required");
+        }
+        String kakaoId = firstText(oauthUser.getAttribute("kakaoId"), oauthUser.getAttribute("id"));
+        if (kakaoId == null) {
+            throw new IllegalArgumentException("Authenticated family user is required");
+        }
+        return familyUserRepository.findByKakaoId(kakaoId)
+                .orElseThrow(() -> new IllegalArgumentException("Authenticated family user is required"));
+    }
     private static String firstText(Object first, Object second) {
         if (first instanceof String text && !text.isBlank()) return text;
         if (second instanceof String text && !text.isBlank()) return text;

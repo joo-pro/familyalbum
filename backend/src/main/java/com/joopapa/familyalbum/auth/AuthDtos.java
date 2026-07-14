@@ -21,7 +21,7 @@ public final class AuthDtos {
         }
 
         static MeResponse from(FamilyUser user) {
-            return new MeResponse(true, user.isApproved(), user.getRole() == FamilyUserRole.ADMIN, UserResponse.from(user));
+            return new MeResponse(true, user.isApproved(), user.getRole().isParent(), UserResponse.from(user));
         }
     }
 
