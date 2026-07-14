@@ -632,6 +632,16 @@ h1 {
   gap: 4px;
 }
 
+.gallery-grid.is-selection-mode .asset-card {
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.gallery-grid.is-drag-selecting .asset-card {
+  cursor: crosshair;
+}
+
 .asset-card {
   display: block;
   overflow: hidden;

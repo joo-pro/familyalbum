@@ -18,6 +18,7 @@ const currentUploadIndex = ref(0)
 const activeAsset = ref(null)
 const isSelectionMode = ref(false)
 const selectedAssetIds = ref(new Set())
+const isDragSelecting = ref(false)
 const isActionMenuOpen = ref(false)
 const isDetailMenuOpen = ref(false)
 const isDetailInfoOpen = ref(false)
@@ -42,8 +43,8 @@ let thumbnailObserver
 let toastTimer
 let previousBodyOverflow = ''
 let serviceWorkerRegistration
-
-
+let dragSelectionState = null
+let suppressNextAssetClick = false
 const totalSize = computed(() => selectedFiles.value.reduce((sum, file) => sum + file.size, 0))
 const currentUser = computed(() => session.value.user)
 const canAccessAlbum = computed(() => session.value.authenticated && session.value.approved)
@@ -484,11 +485,60 @@ function uploadFileWithProgress(file, onProgress) {
   })
 }
 function handleAssetClick(asset) {
+  if (suppressNextAssetClick) {
+    suppressNextAssetClick = false
+    return
+  }
   if (isSelectionMode.value) {
     toggleAssetSelection(asset.id)
     return
   }
   openAsset(asset)
+}
+
+function handleAssetPointerDown(event, asset) {
+  if (!isSelectionMode.value || event.button > 0) return
+  if (event.pointerType === 'mouse' && event.buttons !== 1) return
+  event.preventDefault()
+  suppressNextAssetClick = true
+  dragSelectionState = {
+    pointerId: event.pointerId,
+    selected: !isSelected(asset.id),
+    visited: new Set(),
+  }
+  isDragSelecting.value = true
+  event.currentTarget.setPointerCapture?.(event.pointerId)
+  applyDragSelection(asset.id)
+}
+
+function handleAssetPointerMove(event) {
+  if (!dragSelectionState || dragSelectionState.pointerId !== event.pointerId) return
+  event.preventDefault()
+  const target = document.elementFromPoint(event.clientX, event.clientY)?.closest?.('[data-asset-id]')
+  const assetId = target?.dataset?.assetId
+  if (assetId) applyDragSelection(assetId)
+}
+
+function handleAssetPointerEnd(event) {
+  if (!dragSelectionState || dragSelectionState.pointerId !== event.pointerId) return
+  event.preventDefault()
+  dragSelectionState = null
+  isDragSelecting.value = false
+  window.setTimeout(() => {
+    suppressNextAssetClick = false
+  }, 350)
+}
+
+function applyDragSelection(assetId) {
+  if (!dragSelectionState || dragSelectionState.visited.has(assetId)) return
+  dragSelectionState.visited.add(assetId)
+  const next = new Set(selectedAssetIds.value)
+  if (dragSelectionState.selected) {
+    next.add(assetId)
+  } else {
+    next.delete(assetId)
+  }
+  selectedAssetIds.value = next
 }
 
 function openAsset(asset) {
@@ -568,6 +618,9 @@ function toggleSelectionMode() {
   isActionMenuOpen.value = false
   if (!isSelectionMode.value) {
     clearSelection()
+    dragSelectionState = null
+    isDragSelecting.value = false
+    suppressNextAssetClick = false
   }
 }
 
@@ -915,15 +968,20 @@ function formatBytes(bytes) {
             <span>{{ group.assets.length }}개</span>
           </div>
 
-          <div class="gallery-grid">
+          <div class="gallery-grid" :class="{ 'is-selection-mode': isSelectionMode, 'is-drag-selecting': isDragSelecting }">
             <button
               v-for="asset in group.assets"
               :key="asset.id"
               class="asset-card"
               :class="{ 'is-selected': isSelected(asset.id) }"
               type="button"
+              :data-asset-id="asset.id"
               :aria-label="`${asset.filename} ${isSelectionMode ? '선택하기' : '자세히 보기'}`"
               @click="handleAssetClick(asset)"
+              @pointerdown="handleAssetPointerDown($event, asset)"
+              @pointermove="handleAssetPointerMove"
+              @pointerup="handleAssetPointerEnd"
+              @pointercancel="handleAssetPointerEnd"
             >
               <div class="asset-thumb" v-lazy-thumbnail="asset.id">
                 <img v-if="isThumbnailVisible(asset.id)" :src="mediaThumbnailUrl(asset)" :alt="asset.filename" :loading="thumbnailLoadingMode(asset.id)" :fetchpriority="thumbnailFetchPriority(asset.id)" decoding="async" />
