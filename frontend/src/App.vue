@@ -484,13 +484,15 @@ function uploadFileWithProgress(file, onProgress) {
     request.send(formData)
   })
 }
-function handleAssetClick(asset) {
+function handleAssetClick(event, asset) {
   if (suppressNextAssetClick) {
     suppressNextAssetClick = false
     return
   }
   if (isSelectionMode.value) {
-    toggleAssetSelection(asset.id)
+    if (event.target.closest('.select-badge')) {
+      toggleAssetSelection(asset.id)
+    }
     return
   }
   openAsset(asset)
@@ -498,6 +500,7 @@ function handleAssetClick(asset) {
 
 function handleAssetPointerDown(event, asset) {
   if (!isSelectionMode.value || event.button > 0) return
+  if (!event.target.closest('.select-badge')) return
   if (event.pointerType === 'mouse' && event.buttons !== 1) return
   event.preventDefault()
   suppressNextAssetClick = true
@@ -1024,7 +1027,7 @@ function formatBytes(bytes) {
               type="button"
               :data-asset-id="asset.id"
               :aria-label="`${asset.filename} ${isSelectionMode ? '선택하기' : '자세히 보기'}`"
-              @click="handleAssetClick(asset)"
+              @click="handleAssetClick($event, asset)"
               @pointerdown="handleAssetPointerDown($event, asset)"
               @pointermove="handleAssetPointerMove"
               @pointerup="handleAssetPointerEnd"
@@ -1090,13 +1093,13 @@ function formatBytes(bytes) {
           ></video>
           <img v-else :src="mediaViewUrl(activeAsset)" :alt="activeAsset.filename" />
         </div>
-        <div class="detail-quick-actions">
+        <div class="detail-quick-actions" @click.stop>
           <div v-if="isDetailMenuOpen" class="detail-menu" role="menu">
-            <button type="button" role="menuitem" @click="toggleDetailInfo">상세</button>
+            <button type="button" role="menuitem" @click.stop="toggleDetailInfo">상세</button>
             <button v-if="canManageMedia" type="button" role="menuitem" class="danger-button" @click="deleteAsset(activeAsset)">삭제</button>
           </div>
           <button class="detail-save-trigger" type="button" :aria-label="downloadActionLabel" @click="downloadAsset(activeAsset)">&#8595;</button>
-          <button class="detail-menu-trigger" type="button" :aria-expanded="isDetailMenuOpen" aria-label="상세 조작 메뉴" @click="isDetailMenuOpen = !isDetailMenuOpen">i</button>
+          <button class="detail-menu-trigger" type="button" :aria-expanded="isDetailMenuOpen" aria-label="상세 조작 메뉴" @click.stop="isDetailMenuOpen = !isDetailMenuOpen">i</button>
         </div>
 
         <div v-if="isDetailInfoOpen" class="detail-info">

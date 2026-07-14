@@ -632,12 +632,6 @@ h1 {
   gap: 4px;
 }
 
-.gallery-grid.is-selection-mode .asset-card {
-  touch-action: none;
-  user-select: none;
-  -webkit-user-select: none;
-}
-
 .gallery-grid.is-drag-selecting .asset-card {
   cursor: crosshair;
 }
@@ -735,6 +729,16 @@ h1 {
   font-size: 14px;
   font-weight: 950;
   box-shadow: 0 8px 18px rgba(20, 50, 76, 0.2);
+  z-index: 2;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.select-badge::before {
+  position: absolute;
+  inset: -12px;
+  content: '';
 }
 
 .select-badge.is-on {
