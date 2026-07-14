@@ -75,6 +75,14 @@ const canUseNotifications = computed(() => typeof window !== 'undefined'
   && 'serviceWorker' in navigator
   && 'PushManager' in window
   && 'Notification' in window)
+const heroTitleParts = computed(() => {
+  const title = appConfig.value.appTitle.trim()
+  const [firstPart, ...restParts] = title.split(/\s+/).filter(Boolean)
+  return {
+    first: firstPart || title,
+    rest: restParts.join(' '),
+  }
+})
 const pushButtonLabel = computed(() => {
   if (isPushLoading.value) return '알림 설정 중'
   if (!canUseNotifications.value) return '알림 미지원'
@@ -893,7 +901,10 @@ function formatBytes(bytes) {
             </div>
             <div class="hero-title-block">
               <span class="hero-kicker">Family Album</span>
-              <h1>{{ appConfig.appTitle }}</h1>
+              <h1 class="hero-title">
+                <span>{{ heroTitleParts.first }}</span>
+                <span v-if="heroTitleParts.rest">{{ heroTitleParts.rest }}</span>
+              </h1>
               <div class="hero-title-lines" aria-hidden="true">
                 <span></span>
                 <span></span>

@@ -165,6 +165,17 @@
   filter: drop-shadow(0 3px 0 rgba(82, 160, 215, 0.18));
 }
 
+.hero-title {
+  display: flex;
+  flex-wrap: wrap;
+  column-gap: 0.22em;
+}
+
+.hero-title span {
+  display: inline-block;
+  white-space: nowrap;
+}
+
 .hero-kicker {
   display: inline-flex;
   align-items: center;
@@ -1025,6 +1036,21 @@ h1 {
 
   h1 {
     font-size: 40px;
+  }
+
+  .hero-title-block h1 {
+    font-size: clamp(42px, 13vw, 58px);
+    -webkit-text-stroke: 1.1px #ffffff;
+    text-shadow:
+      0 2px 0 #ffffff,
+      0 4px 0 rgba(255, 220, 232, 0.84),
+      2px 6px 0 rgba(255, 241, 168, 0.74),
+      0 12px 22px rgba(45, 105, 151, 0.22);
+  }
+
+  .hero-title {
+    display: grid;
+    gap: 2px;
   }
 
   .hero-actions,
