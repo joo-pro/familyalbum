@@ -1,23 +1,32 @@
 package com.joopapa.familyalbum.config;
 
 import com.joopapa.familyalbum.auth.FamilyOAuth2UserService;
+import com.joopapa.familyalbum.auth.FamilyUserRepository;
+import com.joopapa.familyalbum.auth.FamilyUserRole;
 import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.http.HttpMethod;
+import org.springframework.security.authorization.AuthorizationDecision;
+import org.springframework.security.authorization.AuthorizationManager;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
+import org.springframework.security.oauth2.core.user.OAuth2User;
 import org.springframework.security.web.SecurityFilterChain;
+import org.springframework.security.web.access.intercept.RequestAuthorizationContext;
 import org.springframework.web.cors.CorsConfiguration;
 import org.springframework.web.cors.CorsConfigurationSource;
 import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
 
+import java.util.Arrays;
 import java.util.List;
+import java.util.Set;
+import java.util.function.Supplier;
 
 @Configuration
 public class SecurityConfig {
 
     @Bean
-    SecurityFilterChain securityFilterChain(HttpSecurity http, FamilyOAuth2UserService familyOAuth2UserService) throws Exception {
+    SecurityFilterChain securityFilterChain(HttpSecurity http, FamilyOAuth2UserService familyOAuth2UserService, FamilyUserRepository familyUserRepository) throws Exception {
         return http
                 .csrf(csrf -> csrf.disable())
                 .cors(cors -> {})
@@ -38,11 +47,11 @@ public class SecurityConfig {
                                 "/manifest.webmanifest",
                                 "/sw.js"
                         ).permitAll()
-                        .requestMatchers(HttpMethod.POST, "/api/media/upload", "/api/media/upload-url", "/api/media/upload-complete", "/api/media/visibility").hasAnyRole("MOTHER", "FATHER")
-                        .requestMatchers(HttpMethod.DELETE, "/api/media/**").hasAnyRole("MOTHER", "FATHER")
-                        .requestMatchers(HttpMethod.POST, "/api/media/delete").hasAnyRole("MOTHER", "FATHER")
-                        .requestMatchers("/api/admin/**").hasAnyRole("MOTHER", "FATHER")
-                        .requestMatchers("/api/media/**", "/api/push/subscriptions").hasAnyRole("MOTHER", "FATHER", "FAMILY")
+                        .requestMatchers(HttpMethod.POST, "/api/media/upload", "/api/media/upload-url", "/api/media/upload-complete", "/api/media/visibility").access(hasCurrentRole(familyUserRepository, FamilyUserRole.MOTHER, FamilyUserRole.FATHER))
+                        .requestMatchers(HttpMethod.DELETE, "/api/media/**").access(hasCurrentRole(familyUserRepository, FamilyUserRole.MOTHER, FamilyUserRole.FATHER))
+                        .requestMatchers(HttpMethod.POST, "/api/media/delete").access(hasCurrentRole(familyUserRepository, FamilyUserRole.MOTHER, FamilyUserRole.FATHER))
+                        .requestMatchers("/api/admin/**").access(hasCurrentRole(familyUserRepository, FamilyUserRole.MOTHER, FamilyUserRole.FATHER))
+                        .requestMatchers("/api/media/**", "/api/push/subscriptions").access(hasCurrentRole(familyUserRepository, FamilyUserRole.MOTHER, FamilyUserRole.FATHER, FamilyUserRole.FAMILY))
                         .requestMatchers("/api/**").authenticated()
                         .anyRequest().permitAll()
                 )
@@ -61,6 +70,29 @@ public class SecurityConfig {
                         .invalidateHttpSession(true)
                 )
                 .build();
+    }
+
+    private static AuthorizationManager<RequestAuthorizationContext> hasCurrentRole(FamilyUserRepository familyUserRepository, FamilyUserRole... roles) {
+        Set<FamilyUserRole> allowedRoles = Set.copyOf(Arrays.asList(roles));
+        return (Supplier<org.springframework.security.core.Authentication> authenticationSupplier, RequestAuthorizationContext context) -> {
+            org.springframework.security.core.Authentication authentication = authenticationSupplier.get();
+            if (authentication == null || !authentication.isAuthenticated() || !(authentication.getPrincipal() instanceof OAuth2User oauthUser)) {
+                return new AuthorizationDecision(false);
+            }
+            String kakaoId = firstText(oauthUser.getAttribute("kakaoId"), oauthUser.getAttribute("id"));
+            boolean granted = kakaoId != null && familyUserRepository.findByKakaoId(kakaoId)
+                    .map(user -> allowedRoles.contains(user.getRole()))
+                    .orElse(false);
+            return new AuthorizationDecision(granted);
+        };
+    }
+
+    private static String firstText(Object first, Object second) {
+        if (first instanceof String text && !text.isBlank()) return text;
+        if (second instanceof String text && !text.isBlank()) return text;
+        if (first instanceof Number number) return String.valueOf(number);
+        if (second instanceof Number number) return String.valueOf(number);
+        return null;
     }
 
     @Bean
