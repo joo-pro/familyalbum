@@ -1,5 +1,7 @@
 package com.joopapa.familyalbum.config;
 
+import com.joopapa.familyalbum.auth.FamilyOAuth2UserService;
+import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
@@ -14,13 +16,45 @@ import java.util.List;
 public class SecurityConfig {
 
     @Bean
-    SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
+    SecurityFilterChain securityFilterChain(HttpSecurity http, FamilyOAuth2UserService familyOAuth2UserService) throws Exception {
         return http
                 .csrf(csrf -> csrf.disable())
                 .cors(cors -> {})
                 .authorizeHttpRequests(auth -> auth
-                        .requestMatchers("/api/**").permitAll()
+                        .requestMatchers(
+                                "/api/health",
+                                "/api/auth/me",
+                                "/api/admin/media/backfill-web-assets",
+                                "/api/push/public-key",
+                                "/oauth2/**",
+                                "/login/oauth2/**",
+                                "/",
+                                "/index.html",
+                                "/assets/**",
+                                "/app-config.json",
+                                "/favicon.ico",
+                                "/icon.png",
+                                "/manifest.webmanifest",
+                                "/sw.js"
+                        ).permitAll()
+                        .requestMatchers("/api/admin/**").hasRole("ADMIN")
+                        .requestMatchers("/api/media/**", "/api/push/subscriptions").hasAnyRole("VIEWER", "ADMIN")
+                        .requestMatchers("/api/**").authenticated()
                         .anyRequest().permitAll()
+                )
+                .exceptionHandling(exceptions -> exceptions
+                        .authenticationEntryPoint((request, response, authException) -> response.sendError(HttpServletResponse.SC_UNAUTHORIZED))
+                        .accessDeniedHandler((request, response, accessDeniedException) -> response.sendError(HttpServletResponse.SC_FORBIDDEN))
+                )
+                .oauth2Login(oauth -> oauth
+                        .userInfoEndpoint(userInfo -> userInfo.userService(familyOAuth2UserService))
+                        .defaultSuccessUrl("/", true)
+                )
+                .logout(logout -> logout
+                        .logoutUrl("/api/auth/logout")
+                        .logoutSuccessHandler((request, response, authentication) -> response.setStatus(HttpServletResponse.SC_NO_CONTENT))
+                        .deleteCookies("JSESSIONID")
+                        .invalidateHttpSession(true)
                 )
                 .build();
     }

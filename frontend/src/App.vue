@@ -29,6 +29,10 @@ const isLoadingAssets = ref(false)
 const assetLoadMessage = ref('')
 const hasMoreAssets = ref(true)
 const visibleThumbnailIds = ref(new Set())
+const session = ref({ loading: true, authenticated: false, approved: false, admin: false, user: null })
+const isAdminPanelOpen = ref(false)
+const adminUsers = ref([])
+const isLoadingAdminUsers = ref(false)
 const pushState = ref('checking')
 const isPushLoading = ref(false)
 
@@ -40,6 +44,9 @@ let serviceWorkerRegistration
 
 
 const totalSize = computed(() => selectedFiles.value.reduce((sum, file) => sum + file.size, 0))
+const currentUser = computed(() => session.value.user)
+const canAccessAlbum = computed(() => session.value.authenticated && session.value.approved)
+const isAdmin = computed(() => session.value.admin)
 const uploadProgressPercent = computed(() => Math.min(100, Math.round(uploadProgress.value)))
 const uploadStatusText = computed(() => {
   if (!isUploading.value) return selectedFiles.value.length ? `${selectedFiles.value.length}개 선택됨` : '업로드 상태'
@@ -90,7 +97,10 @@ const timelineGroups = computed(() => {
 })
 
 onMounted(async () => {
-  await Promise.all([loadAppConfig(), loadAssets(), initializePushNotifications()])
+  await Promise.all([loadAppConfig(), loadSession()])
+  if (canAccessAlbum.value) {
+    await Promise.all([loadAssets(), initializePushNotifications()])
+  }
   await nextTick()
   setupLoadMoreObserver()
 })
@@ -114,6 +124,72 @@ async function loadAppConfig() {
 }
 
 
+
+async function loadSession() {
+  session.value = { ...session.value, loading: true }
+  try {
+    const response = await fetch('/api/auth/me', { cache: 'no-store' })
+    if (!response.ok) throw new Error('AUTH_SESSION_' + response.status)
+    session.value = { loading: false, ...await response.json() }
+  } catch {
+    session.value = { loading: false, authenticated: false, approved: false, admin: false, user: null }
+  }
+}
+
+function loginWithKakao() {
+  window.location.href = '/oauth2/authorization/kakao'
+}
+
+async function logout() {
+  await fetch('/api/auth/logout', { method: 'POST' })
+  session.value = { loading: false, authenticated: false, approved: false, admin: false, user: null }
+  assets.value = []
+  activeAsset.value = null
+  isAdminPanelOpen.value = false
+  showToast('로그아웃했어요.')
+}
+
+async function openAdminPanel() {
+  isActionMenuOpen.value = false
+  isAdminPanelOpen.value = true
+  await loadAdminUsers()
+}
+
+async function loadAdminUsers() {
+  if (!isAdmin.value) return
+  isLoadingAdminUsers.value = true
+  try {
+    const response = await fetch('/api/admin/users', { cache: 'no-store' })
+    if (!response.ok) throw new Error('사용자 목록을 불러오지 못했어요.')
+    const payload = await response.json()
+    adminUsers.value = payload.users ?? []
+  } catch (error) {
+    showToast(error.message)
+  } finally {
+    isLoadingAdminUsers.value = false
+  }
+}
+
+async function updateUserRole(user, role) {
+  try {
+    const response = await fetch(`/api/admin/users/${user.id}/role`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ role }),
+    })
+    if (!response.ok) throw new Error('권한을 변경하지 못했어요.')
+    await loadAdminUsers()
+    showToast('권한을 변경했어요.')
+  } catch (error) {
+    showToast(error.message)
+  }
+}
+
+function roleLabel(role) {
+  if (role === 'ADMIN') return '관리자'
+  if (role === 'VIEWER') return '가족'
+  return '승인 대기'
+}
 async function initializePushNotifications() {
   if (!canUseNotifications.value) {
     pushState.value = 'unsupported'
@@ -137,6 +213,7 @@ async function initializePushNotifications() {
 
 async function enablePushNotifications() {
   isActionMenuOpen.value = false
+  if (!canAccessAlbum.value) return
   if (!canUseNotifications.value) {
     showToast('이 브라우저에서는 알림을 사용할 수 없어요.')
     return
@@ -206,6 +283,7 @@ function urlBase64ToUint8Array(value) {
   return output
 }
 async function loadAssets() {
+  if (!canAccessAlbum.value) return
   assets.value = []
   nextCursor.value = null
   hasMoreAssets.value = true
@@ -681,9 +759,47 @@ function formatBytes(bytes) {
           <div class="memory-sticker memory-sticker-heart">♡</div>
         </div>
       </div>
-    </section>    <input ref="fileInput" class="hidden-file-input" type="file" multiple accept="image/*,video/*,.heic,.heif,.heics,.heifs,.mov,.m4v,image/heic,image/heif,video/quicktime" @change="onFileChange" />
+    </section>
 
-    <section v-if="selectedFiles.length || uploadMessage" class="upload-summary" aria-live="polite">
+    <section v-if="session.loading" class="auth-card">
+      <div class="auth-visual">
+        <img :src="appIconUrl" alt="" aria-hidden="true" />
+      </div>
+      <div>
+        <span class="hero-kicker">Private Album</span>
+        <h2>가족 앨범을 준비하고 있어요</h2>
+        <p>잠시만 기다려 주세요.</p>
+      </div>
+    </section>
+
+    <section v-else-if="!session.authenticated" class="auth-card">
+      <div class="auth-visual">
+        <img :src="appIconUrl" alt="" aria-hidden="true" />
+      </div>
+      <div>
+        <span class="hero-kicker">Private Album</span>
+        <h2>가족만 볼 수 있는 성장일기예요</h2>
+        <p>카카오톡으로 로그인한 뒤 관리자의 승인을 받으면 사진과 동영상을 볼 수 있어요.</p>
+      </div>
+      <button class="kakao-login-button" type="button" @click="loginWithKakao">카카오톡으로 로그인</button>
+    </section>
+
+    <section v-else-if="!session.approved" class="auth-card">
+      <div class="auth-visual">
+        <img v-if="currentUser?.profileImageUrl" :src="currentUser.profileImageUrl" alt="" />
+        <img v-else :src="appIconUrl" alt="" aria-hidden="true" />
+      </div>
+      <div>
+        <span class="hero-kicker">Approval Required</span>
+        <h2>관리자 승인을 기다리고 있어요</h2>
+        <p>{{ currentUser?.nickname }}님으로 로그인했어요. 관리자가 가족 권한을 부여하면 앨범이 열립니다.</p>
+        <small>카카오 ID: {{ currentUser?.kakaoId }}</small>
+      </div>
+      <button class="secondary-action" type="button" @click="logout">로그아웃</button>
+    </section>
+    <input v-if="canAccessAlbum" ref="fileInput" class="hidden-file-input" type="file" multiple accept="image/*,video/*,.heic,.heif,.heics,.heifs,.mov,.m4v,image/heic,image/heif,video/quicktime" @change="onFileChange" />
+
+    <section v-if="canAccessAlbum && (selectedFiles.length || uploadMessage)" class="upload-summary" aria-live="polite">
       <div class="upload-summary-main">
         <div>
           <strong>{{ uploadStatusText }}</strong>
@@ -700,7 +816,7 @@ function formatBytes(bytes) {
       <p v-if="uploadMessage">{{ uploadMessage }}</p>
     </section>
 
-    <section class="content-section">
+    <section v-if="canAccessAlbum" class="content-section">
       <div v-if="isSelectionMode" class="selection-toolbar">
         <div>
           <strong>{{ selectedCount }}개 선택됨</strong>
@@ -766,13 +882,14 @@ function formatBytes(bytes) {
       </div>
     </section>
 
-    <div class="floating-actions" :class="{ 'is-open': isActionMenuOpen }">
+    <div v-if="canAccessAlbum" class="floating-actions" :class="{ 'is-open': isActionMenuOpen }">
       <div v-if="isActionMenuOpen" class="floating-menu" role="menu">
         <button type="button" role="menuitem" @click="openFilePicker">사진/동영상 선택</button>
         <button type="button" role="menuitem" @click="toggleSelectionMode">
           {{ isSelectionMode ? '선택 취소' : '선택 모드' }}
         </button>
         <button type="button" role="menuitem" @click="refreshAssets">새로고침</button>
+        <button v-if="isAdmin" type="button" role="menuitem" @click="openAdminPanel">가족 승인 관리</button>
         <button type="button" role="menuitem" :disabled="isPushLoading || pushState === 'subscribed' || pushState === 'blocked' || pushState === 'server-disabled'" @click="enablePushNotifications">
           {{ pushButtonLabel }}
         </button>
@@ -791,7 +908,7 @@ function formatBytes(bytes) {
       </button>
     </div>
 
-    <div v-if="activeAsset" class="detail-backdrop" @click.self="closeAsset" @wheel.prevent @touchmove.self.prevent>
+    <div v-if="canAccessAlbum && activeAsset" class="detail-backdrop" @click.self="closeAsset" @wheel.prevent @touchmove.self.prevent>
       <article class="detail-panel" role="dialog" aria-modal="true" aria-labelledby="asset-detail-title">
         <button class="detail-close" type="button" aria-label="닫기" @click="closeAsset">×</button>
         <button class="detail-nav detail-prev" type="button" :disabled="!hasPreviousAsset" aria-label="이전 사진" @click="showPreviousAsset">‹</button>
@@ -839,6 +956,34 @@ function formatBytes(bytes) {
           </dl>
         </div>
       </article>
+    </div>
+
+    <div v-if="isAdminPanelOpen" class="admin-backdrop" @click.self="isAdminPanelOpen = false">
+      <section class="admin-panel" role="dialog" aria-modal="true" aria-labelledby="admin-title">
+        <button class="detail-close" type="button" aria-label="닫기" @click="isAdminPanelOpen = false">×</button>
+        <div class="admin-heading">
+          <span class="hero-kicker">Admin</span>
+          <h2 id="admin-title">가족 승인 관리</h2>
+          <p>카카오 로그인한 사용자를 승인하고 권한을 부여해 주세요.</p>
+        </div>
+        <div v-if="isLoadingAdminUsers" class="admin-empty">사용자 목록을 불러오는 중이에요.</div>
+        <div v-else-if="adminUsers.length === 0" class="admin-empty">아직 로그인한 사용자가 없어요.</div>
+        <div v-else class="admin-user-list">
+          <article v-for="user in adminUsers" :key="user.id" class="admin-user-card">
+            <img v-if="user.profileImageUrl" :src="user.profileImageUrl" alt="" />
+            <div v-else class="admin-avatar-placeholder">{{ user.nickname?.slice(0, 1) }}</div>
+            <div>
+              <strong>{{ user.nickname }}</strong>
+              <span>{{ roleLabel(user.role) }} · {{ user.kakaoId }}</span>
+            </div>
+            <div class="admin-user-actions">
+              <button type="button" :disabled="user.role === 'VIEWER'" @click="updateUserRole(user, 'VIEWER')">가족 승인</button>
+              <button type="button" :disabled="user.role === 'ADMIN'" @click="updateUserRole(user, 'ADMIN')">관리자</button>
+              <button type="button" :disabled="user.role === 'PENDING'" class="danger-button" @click="updateUserRole(user, 'PENDING')">권한 회수</button>
+            </div>
+          </article>
+        </div>
+      </section>
     </div>
     <div v-if="toastMessage" class="toast-message" role="status" aria-live="polite">{{ toastMessage }}</div>
   </main>
