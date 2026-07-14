@@ -149,6 +149,22 @@
   min-width: 0;
 }
 
+.hero-title-block h1 {
+  color: #39a8e6;
+  font-family: 'CookieRun', 'Paperozi', system-ui, sans-serif;
+  font-size: clamp(46px, 7.4vw, 82px);
+  font-weight: 700;
+  line-height: 1.02;
+  letter-spacing: 0;
+  -webkit-text-stroke: 1.5px #ffffff;
+  text-shadow:
+    0 2px 0 #ffffff,
+    0 5px 0 rgba(255, 220, 232, 0.82),
+    3px 8px 0 rgba(255, 241, 168, 0.72),
+    0 16px 28px rgba(45, 105, 151, 0.24);
+  filter: drop-shadow(0 3px 0 rgba(82, 160, 215, 0.18));
+}
+
 .hero-kicker {
   display: inline-flex;
   align-items: center;
