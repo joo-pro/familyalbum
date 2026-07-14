@@ -503,20 +503,22 @@ function handleAssetPointerDown(event, asset) {
   suppressNextAssetClick = true
   dragSelectionState = {
     pointerId: event.pointerId,
+    startAssetId: asset.id,
     selected: !isSelected(asset.id),
-    visited: new Set(),
+    baseSelection: new Set(selectedAssetIds.value),
   }
   isDragSelecting.value = true
   event.currentTarget.setPointerCapture?.(event.pointerId)
-  applyDragSelection(asset.id)
+  applyDragSelectionRange(asset.id)
 }
 
 function handleAssetPointerMove(event) {
   if (!dragSelectionState || dragSelectionState.pointerId !== event.pointerId) return
   event.preventDefault()
+  autoScrollDuringDrag(event.clientY)
   const target = document.elementFromPoint(event.clientX, event.clientY)?.closest?.('[data-asset-id]')
   const assetId = target?.dataset?.assetId
-  if (assetId) applyDragSelection(assetId)
+  if (assetId) applyDragSelectionRange(assetId)
 }
 
 function handleAssetPointerEnd(event) {
@@ -529,16 +531,61 @@ function handleAssetPointerEnd(event) {
   }, 350)
 }
 
-function applyDragSelection(assetId) {
-  if (!dragSelectionState || dragSelectionState.visited.has(assetId)) return
-  dragSelectionState.visited.add(assetId)
-  const next = new Set(selectedAssetIds.value)
-  if (dragSelectionState.selected) {
-    next.add(assetId)
-  } else {
-    next.delete(assetId)
+function applyDragSelectionRange(currentAssetId) {
+  if (!dragSelectionState) return
+  const rangeIds = dragRangeAssetIds(dragSelectionState.startAssetId, currentAssetId)
+  const next = new Set(dragSelectionState.baseSelection)
+  for (const assetId of rangeIds) {
+    if (dragSelectionState.selected) {
+      next.add(assetId)
+    } else {
+      next.delete(assetId)
+    }
   }
   selectedAssetIds.value = next
+}
+
+function dragRangeAssetIds(startAssetId, currentAssetId) {
+  const startCard = findAssetCard(startAssetId)
+  const currentCard = findAssetCard(currentAssetId)
+  if (!startCard || !currentCard) return [currentAssetId]
+
+  const startRect = startCard.getBoundingClientRect()
+  const currentRect = currentCard.getBoundingClientRect()
+  const left = Math.min(startRect.left, currentRect.left) - 1
+  const right = Math.max(startRect.right, currentRect.right) + 1
+  const top = Math.min(startRect.top, currentRect.top) - 1
+  const bottom = Math.max(startRect.bottom, currentRect.bottom) + 1
+
+  return assetCards()
+    .filter((card) => {
+      const rect = card.getBoundingClientRect()
+      const centerX = rect.left + rect.width / 2
+      const centerY = rect.top + rect.height / 2
+      return centerX >= left && centerX <= right && centerY >= top && centerY <= bottom
+    })
+    .map((card) => card.dataset.assetId)
+    .filter(Boolean)
+}
+
+function findAssetCard(assetId) {
+  return assetCards().find((card) => card.dataset.assetId === assetId)
+}
+
+function assetCards() {
+  return Array.from(document.querySelectorAll('.asset-card[data-asset-id]'))
+}
+
+function autoScrollDuringDrag(clientY) {
+  const edgeSize = 88
+  const maxStep = 18
+  if (clientY < edgeSize) {
+    window.scrollBy({ top: -maxStep, behavior: 'auto' })
+    return
+  }
+  if (clientY > window.innerHeight - edgeSize) {
+    window.scrollBy({ top: maxStep, behavior: 'auto' })
+  }
 }
 
 function openAsset(asset) {
